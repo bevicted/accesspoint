@@ -3,8 +3,8 @@ mod cli;
 fn main() {
     let cli_matches = cli::parse();
 
-    if *cli_matches.get_one::<bool>(cli::FLAG_PANCAKE).unwrap() {
-        println!("Pancake was provided");
+    if *cli_matches.get_one::<bool>(cli::FLAG_VALIDATE).unwrap() {
+        println!("Validate was provided");
         std::process::exit(0);
     }
 
