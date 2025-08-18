@@ -1,10 +1,13 @@
+use toml::Table;
+
 mod cli;
 
 fn main() {
-    let cli_matches = cli::parse();
+    let args = cli::parse();
 
-    if *cli_matches.get_one::<bool>(cli::FLAG_VALIDATE).unwrap() {
-        println!("Validate was provided");
+    println!("{:?}", args);
+
+    if args.is_validation {
         std::process::exit(0);
     }
 
