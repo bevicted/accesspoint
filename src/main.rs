@@ -1,8 +1,12 @@
+use ratatui::{
+    Frame,
+    crossterm::event::{self, Event},
+};
 use toml::Table;
 
 mod cli;
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = cli::parse();
 
     println!("{:?}", args);
@@ -11,9 +15,23 @@ fn main() {
         std::process::exit(0);
     }
 
-    let mut siv = cursive::default();
+    let terminal = ratatui::init();
+    let result = run(terminal);
 
-    siv.add_global_callback('q', |s| s.quit());
+    ratatui::restore();
 
-    siv.run();
+    result
+}
+
+fn run(mut terminal: ratatui::DefaultTerminal) -> Result<(), Box<dyn std::error::Error>> {
+    loop {
+        terminal.draw(render)?;
+        if matches!(event::read()?, Event::Key(_)) {
+            break Ok(());
+        }
+    }
+}
+
+fn render(frame: &mut Frame) {
+    frame.render_widget("hello world", frame.area());
 }
