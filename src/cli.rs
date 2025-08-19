@@ -7,14 +7,14 @@ pub const FLAG_SOURCE: &str = "source";
 pub const ARG_TARGET: &str = "target";
 
 #[derive(Debug)]
-pub struct Args<'a> {
-    pub source_path: &'a PathBuf,
-    pub target: Option<&'a String>,
+pub struct Args {
+    pub source_path: PathBuf,
+    pub target: Option<String>,
     pub is_silent: bool,
     pub is_validation: bool,
 }
 
-pub fn parse<'a>() -> Args<'a> {
+pub fn parse() -> Args {
     let matches = command!()
         .arg(
             Arg::new(FLAG_SILENT)
@@ -42,8 +42,8 @@ pub fn parse<'a>() -> Args<'a> {
         .get_matches();
 
     Args {
-        source_path: matches.get_one::<PathBuf>(FLAG_SOURCE).unwrap(),
-        target: matches.get_one::<String>(ARG_TARGET),
+        source_path: matches.get_one::<PathBuf>(FLAG_SOURCE).unwrap().clone(),
+        target: matches.get_one::<String>(ARG_TARGET).cloned(),
         is_silent: *matches.get_one::<bool>(FLAG_SILENT).unwrap(),
         is_validation: *matches.get_one::<bool>(FLAG_VALIDATE).unwrap(),
     }
