@@ -1,9 +1,10 @@
-["https://github.com/bevicted/accesspoint"]
-# url = "https://github.com/bevicted/accesspoint"
-# host = "github.com"
-# owner = "bevicted"
-# repo = "accesspoint"
+[accesspoint]
+STRING = "ay"
+url = "https://github.com/bevicted/accesspoint"
+host = "github.com"
+owner = "bevicted"
+repo = "accesspoint"
 alias = "ap"
-commits = "{URL}/commits"
+commits = "{url}/commits"
 commit = "https://github.com/bevicted/accesspoint/commit/{STRING}"
 lang = "rust"

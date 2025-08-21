@@ -1,5 +1,5 @@
+mod catalog;
 mod cli;
-mod source;
 mod ui;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -7,9 +7,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("{:?}", args);
 
-    let source = source::parse(&args.source_path);
+    let entries = catalog::parse(&args.source_path);
 
-    println!("{:?}", source);
+    println!("{:?}", entries);
 
     if args.is_validation {
         std::process::exit(0);
