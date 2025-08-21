@@ -1,6 +1,10 @@
 [accesspoint]
-STRING = "ay"
 url = "https://github.com/bevicted/accesspoint"
+# c1 = "{url}/{c2}"
+# c2 = "{c3}"
+# c3 = "{c1}"
+c4 = {"a" = "b"}
+c5 = "{c4}"
 host = "github.com"
 owner = "bevicted"
 repo = "accesspoint"
