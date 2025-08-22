@@ -22,53 +22,23 @@ pub fn parse(path: &PathBuf) -> Result<HashMap<String, Table>> {
     let file = fs::read_to_string(path)?;
     let table = toml::from_str::<HashMap<String, Table>>(&file)?;
 
-    for (proj_name, proj_fields) in table.iter_mut() {
-        dbg!(proj_name);
-        let mut proj_deps = HashMap::with_capacity(table.len());
-        for (field_key, field_val) in proj_fields.iter() {
-            dbg!(field_key);
-            let mut field_deps = Vec::new();
-            if RESERVED_KEYS.contains(&field_key.as_str()) {
-                return Err("used reserved variable name".into());
-            }
-            let Some(s) = field_val.as_str() else {
-                continue;
-            };
+    for (project, fields) in table.iter() {
+        dbg!(project);
+        let mut templates = parse_templates(fields);
 
-            let mut in_var = false;
-            let mut var_start: usize = 0;
-            for (i, c) in s.char_indices() {
-                if !in_var && c == '{' {
-                    in_var = true;
-                    var_start = i;
-                    continue;
-                }
-                if in_var && c == '}' {
-                    in_var = false;
-                    field_deps.push(Template {
-                        var: s[var_start..i + 1].to_owned(),
-                        start: var_start,
-                        end: i + 1,
-                    });
-                }
-            }
-            if !field_deps.is_empty() {
-                proj_deps.insert(field_key, field_deps);
-            }
-        }
-
-        for k in proj_deps.keys() {
+        for k in templates.keys() {
             let mut visit_tree = BTreeSet::new();
-            let mut queue = VecDeque::new();
-            queue.push_back(*k);
-            while let Some(dep) = queue.pop_front() {
-                if visit_tree.contains(dep) {
-                    return Err(format!("cyclic import: {} <-> {}", k, dep).into());
+            let mut queue = VecDeque::from([*k]);
+
+            while let Some(field) = queue.pop_front() {
+                if visit_tree.contains(field) {
+                    return Err(format!("cyclic import: {} <-> {}", k, field).into());
                 }
-                visit_tree.insert(dep);
-                if proj_deps.contains_key(dep) {
-                    for k in &proj_deps[dep] {
-                        let v = &proj_fields[&k.var];
+                visit_tree.insert(field);
+
+                if templates.contains_key(field) {
+                    for k in &templates[field] {
+                        let v = &fields[&k.var];
                         if !(v.is_str() || v.is_integer() || v.is_float() || v.is_bool()) {
                             return Err(format!(
                                 "cant template {} of type {}",
@@ -82,36 +52,71 @@ pub fn parse(path: &PathBuf) -> Result<HashMap<String, Table>> {
                 }
             }
 
-            resolve(k, &mut proj_fields, &mut proj_deps);
+            resolve(k, &mut fields, &mut templates);
         }
     }
     Ok(table)
 }
 
-fn resolve(key: &String, fields: &mut Table, deps: &mut HashMap<&String, Vec<Template>>) {
-    if !deps.contains_key(key) {
+fn parse_templates(fields: &Table) -> Result<HashMap<&String, Vec<Template>>> {
+    let mut templates = HashMap::new();
+    for (field_key, field_val) in fields.iter() {
+        dbg!(field_key);
+        let mut field_deps = Vec::new();
+        if RESERVED_KEYS.contains(&field_key.as_str()) {
+            return Err("used reserved variable name".into());
+        }
+        let Some(s) = field_val.as_str() else {
+            continue;
+        };
+
+        let mut in_var = false;
+        let mut var_start: usize = 0;
+        for (i, c) in s.char_indices() {
+            if !in_var && c == '{' {
+                in_var = true;
+                var_start = i;
+                continue;
+            }
+            if in_var && c == '}' {
+                in_var = false;
+                field_deps.push(Template {
+                    var: s[var_start..i + 1].to_owned(),
+                    start: var_start,
+                    end: i + 1,
+                });
+            }
+        }
+        if !field_deps.is_empty() {
+            templates.insert(field_key, field_deps);
+        }
+    }
+    return Ok(templates);
+}
+
+fn resolve(field: &String, fields: &mut Table, templates: &mut HashMap<&String, Vec<Template>>) {
+    if !templates.contains_key(field) {
         return;
     };
 
-    let mut s = String::new();
+    let unresolved_val = fields[field].as_str().unwrap().to_owned();
+    let mut resolved_val = String::new();
     let mut start = 0;
-    let field_val = fields[key].as_str().unwrap().to_owned();
 
-    for t in deps[key].clone() {
-        resolve(&t.var, fields, deps);
-        s.push_str(&field_val[start..t.start]);
-        let template_val = match &fields[&t.var] {
+    for template in templates.remove(field).unwrap() {
+        resolve(&template.var, fields, templates);
+        resolved_val.push_str(&unresolved_val[start..template.start]);
+        let template_val = match &fields[&template.var] {
             toml::Value::String(v) => v,
             toml::Value::Integer(v) => &v.to_string(),
             toml::Value::Float(v) => &v.to_string(),
             toml::Value::Boolean(v) => &v.to_string(),
             _ => unreachable!(),
         };
-        s.push_str(template_val);
-        start = t.end;
+        resolved_val.push_str(template_val);
+        start = template.end;
     }
 
-    s.push_str(&field_val[start..]);
-    fields[key] = s.into();
-    deps.remove(key);
+    resolved_val.push_str(&unresolved_val[start..]);
+    fields[field] = resolved_val.into();
 }
