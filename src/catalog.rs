@@ -12,17 +12,16 @@ const TEMPLATE_NUMBER: &str = "NUMBER";
 const RESERVED_KEYS: &[&str] = &[TEMPLATE_STRING, TEMPLATE_NUMBER];
 
 #[derive(Debug, Clone)]
-enum TemplateType {
-    Reference,
-    Input,
+struct Template {
+    reference: String,
+    at: usize,
 }
 
 #[derive(Debug, Clone)]
-struct Template {
-    var: String,
-    start: usize,
-    end: usize,
-    t: TemplateType,
+enum Field {
+    Resolved(toml::Value),
+    Unresolved(toml::Value, Vec<Template>),
+    WithInput(toml::Value, Vec<Template>),
 }
 
 pub fn parse(path: &PathBuf) -> Result<HashMap<String, Table>> {
@@ -31,7 +30,7 @@ pub fn parse(path: &PathBuf) -> Result<HashMap<String, Table>> {
 
     for (project, fields) in table.iter() {
         dbg!(project);
-        let templates = parse_templates(fields)?;
+        let templates = parse_fields(fields)?;
 
         for k in templates.keys() {
             let mut visit_tree = BTreeSet::new();
@@ -69,48 +68,58 @@ pub fn parse(path: &PathBuf) -> Result<HashMap<String, Table>> {
     Ok(table)
 }
 
-fn parse_templates(fields: &Table) -> Result<HashMap<&String, Vec<Template>>> {
-    let mut templates = HashMap::new();
+fn parse_fields(fields: &Table) -> Result<HashMap<&String, Field>> {
+    let mut parsed_fields: HashMap<&String, Field> = HashMap::new();
+
     for (field_key, field_val) in fields.iter() {
         dbg!(field_key);
         let mut field_templates = Vec::new();
+
         if RESERVED_KEYS.contains(&field_key.as_str()) {
             return Err("used reserved variable name".into());
         }
+
+        // only strings can contain references
         let Some(s) = field_val.as_str() else {
+            parsed_fields.insert(field_key, Field::Resolved(field_val.to_owned()));
             continue;
         };
 
-        let mut in_var = false;
-        let mut var_start: usize = 0;
+        let mut in_ref = false;
+        let mut last_ref_boundary: usize = 0;
+        let mut cleaned_val = String::new();
+
         for (i, c) in s.char_indices() {
-            if !in_var && c == '{' {
-                in_var = true;
-                var_start = i + 1;
+            if !in_ref && c == '{' {
+                in_ref = true;
+                cleaned_val.push_str(&s[last_ref_boundary..i]);
+                last_ref_boundary = i;
                 continue;
             }
-            if in_var && c == '}' {
-                in_var = false;
-                let var = &s[var_start..i];
-                let template_type = if RESERVED_KEYS.contains(&var) {
-                    TemplateType::Reference
-                } else {
-                    TemplateType::Input
-                };
+
+            if in_ref && c == '}' {
+                in_ref = false;
                 field_templates.push(Template {
-                    var: var.to_owned(),
-                    start: var_start,
-                    end: i + 1,
-                    t: template_type,
+                    reference: s[last_ref_boundary + 1..i].to_owned(),
+                    at: last_ref_boundary,
                 });
+                last_ref_boundary = i;
             }
         }
-        if !field_templates.is_empty() {
-            templates.insert(field_key, field_templates);
-        }
+
+        cleaned_val.push_str(&s[last_ref_boundary..]);
+
+        parsed_fields.insert(
+            field_key,
+            if field_templates.is_empty() {
+                Field::Resolved(field_val.to_owned())
+            } else {
+                Field::Unresolved(field_val.to_owned(), field_templates)
+            },
+        );
     }
 
-    Ok(templates)
+    Ok(parsed_fields)
 }
 
 fn resolve(field: &String, fields: &mut Table, templates: &mut HashMap<&String, Vec<Template>>) {
@@ -123,9 +132,9 @@ fn resolve(field: &String, fields: &mut Table, templates: &mut HashMap<&String, 
     let mut from = 0;
 
     for template in templates.remove(field).unwrap() {
-        resolve(&template.var, fields, templates);
-        resolved_val.push_str(&unresolved_val[from..template.start]);
-        let template_val = match &fields[&template.var] {
+        resolve(&template.reference, fields, templates);
+        resolved_val.push_str(&unresolved_val[from..template.at]);
+        let template_val = match &fields[&template.reference] {
             toml::Value::String(v) => v,
             toml::Value::Integer(v) => &v.to_string(),
             toml::Value::Float(v) => &v.to_string(),
