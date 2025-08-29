@@ -12,7 +12,7 @@ const TEMPLATE_NUMBER: &str = "NUMBER";
 const RESERVED_KEYS: &[&str] = &[TEMPLATE_STRING, TEMPLATE_NUMBER];
 
 #[derive(Debug, Clone)]
-struct Template {
+struct Insert {
     reference: String,
     at: usize,
 }
@@ -20,8 +20,8 @@ struct Template {
 #[derive(Debug, Clone)]
 enum Field {
     Resolved(toml::Value),
-    Unresolved(toml::Value, Vec<Template>),
-    WithInput(toml::Value, Vec<Template>),
+    Unresolved(toml::Value, Vec<Insert>),
+    WithInput(toml::Value, Vec<Insert>),
 }
 
 pub fn parse(path: &PathBuf) -> Result<HashMap<String, Table>> {
@@ -30,9 +30,9 @@ pub fn parse(path: &PathBuf) -> Result<HashMap<String, Table>> {
 
     for (project, fields) in table.iter() {
         dbg!(project);
-        let templates = parse_fields(fields)?;
+        let parsed_fields = parse_fields(fields)?;
 
-        for k in templates.keys() {
+        for (k, parsed_field) in parsed_fields.iter() {
             let mut visit_tree = BTreeSet::new();
             let mut queue = VecDeque::from([*k]);
 
@@ -42,8 +42,8 @@ pub fn parse(path: &PathBuf) -> Result<HashMap<String, Table>> {
                 }
                 visit_tree.insert(field);
 
-                if templates.contains_key(field) {
-                    for template in &templates[field] {
+                if parsed_fields.contains_key(field) {
+                    for template in &parsed_fields[field] {
                         if matches!(template.t, TemplateType::Reference) {
                             continue;
                         }
@@ -99,7 +99,7 @@ fn parse_fields(fields: &Table) -> Result<HashMap<&String, Field>> {
 
             if in_ref && c == '}' {
                 in_ref = false;
-                field_templates.push(Template {
+                field_templates.push(Insert {
                     reference: s[last_ref_boundary + 1..i].to_owned(),
                     at: last_ref_boundary,
                 });
@@ -114,7 +114,7 @@ fn parse_fields(fields: &Table) -> Result<HashMap<&String, Field>> {
             if field_templates.is_empty() {
                 Field::Resolved(field_val.to_owned())
             } else {
-                Field::Unresolved(field_val.to_owned(), field_templates)
+                Field::Unresolved(toml::Value::String(cleaned_val), field_templates)
             },
         );
     }
@@ -122,7 +122,7 @@ fn parse_fields(fields: &Table) -> Result<HashMap<&String, Field>> {
     Ok(parsed_fields)
 }
 
-fn resolve(field: &String, fields: &mut Table, templates: &mut HashMap<&String, Vec<Template>>) {
+fn resolve(field: &String, fields: &mut Table, templates: &mut HashMap<&String, Vec<Insert>>) {
     if !templates.contains_key(field) {
         return;
     };
