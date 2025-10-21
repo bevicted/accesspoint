@@ -1,0 +1,28 @@
+What I want:
++ open urls
++ nested objects
++ define names, tags and ids
++ CLI
++ TUI
+
+What I don't want:
+- identify/validate urls
+- multiline objects
+- comments after objects
+
+Invalid:
+- multiple IDs with the same name
+
+format (comments are for concept documentation only)
+
+{"name": "accesspoint"} // show name
+    {"name": "repo", "url": "https://github.com/bevicted/accesspoint"} // show name, open url
+    {"url": "https://github.com/bevicted/accesspoint"} // if name is empty, name = url
+    {"name": "some submenu"}
+        {"url": "some_url1"}
+        {"url": "some_url2"}
+        {"url": "some_url3"}
+    {"name": "some other submenu"}
+        {"url": "some_url", "id": "some_id"} // optional id has to be unique, way to instantly identify item, sign: #
+        {"url": "some_url", "tags": ["tag1", "tag2"]} // tags would come in handy for searches, sign: .
+
