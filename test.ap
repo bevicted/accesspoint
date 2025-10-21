@@ -1,0 +1,10 @@
+{"name": "accesspoint"}
+    {"name": "repo", "url": "https://github.com/bevicted/accesspoint"}
+    {"url": "https://github.com/bevicted/accesspoint"}
+    {"name": "some submenu"}
+        {"url": "some_url1"}
+        {"url": "some_url2"}
+        {"url": "some_url3"}
+    {"name": "some other submenu"}
+        {"url": "some_url", "id": "some_id"}
+        {"url": "some_url", "tags": ["tag1", "tag2"]}
