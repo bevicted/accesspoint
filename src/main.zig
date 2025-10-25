@@ -21,16 +21,26 @@ pub fn main() !void {
     defer line_allocator.deinit();
 
     var r_buf: [4096]u8 = undefined;
-    var fr = file.reader(&r_buf);
-    const r = &fr.interface;
+    var fr: std.fs.File.Reader = file.reader(&r_buf);
+    const r: *std.io.Reader = &fr.interface;
 
     while (true) {
         _ = r.streamDelimiter(&line_allocator.writer, DELIMITER) catch |err| {
             if (err == error.EndOfStream) break else return err;
         };
         r.toss(1);
-        std.debug.print("{s}\n", .{line_allocator.written()});
+        const line = line_allocator.written();
         line_allocator.clearRetainingCapacity();
+
+        std.debug.print("{s}\n", .{line});
+        var indent: usize = undefined;
+        for (0.., line) |idx, char| {
+            if (char != ' ') {
+                indent = idx;
+                break;
+            }
+        }
+        std.debug.print("{d}\n", .{indent});
     }
 
     try accesspoint.bufferedPrint();
