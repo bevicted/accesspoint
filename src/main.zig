@@ -4,6 +4,14 @@ const accesspoint = @import("accesspoint");
 
 const DELIMITER = if (builtin.os.tag == .windows) '\r' else '\n';
 
+const Entry = struct {
+    name: ?[]u8 = null,
+    url: ?[]u8 = null,
+    id: ?[]u8 = null,
+    tags: ?[][]u8 = null,
+    children: ?[]@This() = null,
+};
+
 pub fn main() !void {
     var gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
     defer if (gpa.deinit() == .leak) {
@@ -23,6 +31,7 @@ pub fn main() !void {
     var r_buf: [4096]u8 = undefined;
     var fr: std.fs.File.Reader = file.reader(&r_buf);
     const r: *std.io.Reader = &fr.interface;
+    //var entries: []Entry = undefined;
 
     while (true) {
         _ = r.streamDelimiter(&line_allocator.writer, DELIMITER) catch |err| {
@@ -40,7 +49,12 @@ pub fn main() !void {
                 break;
             }
         }
-        std.debug.print("{d}\n", .{indent});
+        const parsed: std.json.Parsed(Entry) = try std.json.parseFromSlice(Entry, allocator, line[indent..], .{});
+        const entry = parsed.value;
+        if (entry.name) |name| {
+            std.debug.print("{s}\n", .{name});
+        }
+        parsed.deinit();
     }
 
     try accesspoint.bufferedPrint();
