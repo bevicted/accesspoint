@@ -1,27 +1,38 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const accesspoint = @import("accesspoint");
 
+const DELIMITER = if (builtin.os.tag == .windows) '\r' else '\n';
+
 pub fn main() !void {
-    // Prints to stderr, ignoring potential errors.
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
-    try accesspoint.bufferedPrint();
-}
+    // const gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
+    // defer if (gpa.deinit() == .leak) {
+    //     std.log.err("Memory leak", .{});
+    // };
+    // const allocator = gpa.allocator();
 
-test "simple test" {
-    const gpa = std.testing.allocator;
-    var list: std.ArrayList(i32) = .empty;
-    defer list.deinit(gpa); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(gpa, 42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
-}
-
-test "fuzz example" {
-    const Context = struct {
-        fn testOne(context: @This(), input: []const u8) anyerror!void {
-            _ = context;
-            // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
-            try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input));
-        }
+    const path = "test.ap"; // get from CLI later
+    const file = std.fs.cwd().openFile(path, .{ .mode = .read_only }) catch |err| {
+        return err;
     };
-    try std.testing.fuzz(Context{}, Context.testOne, .{});
+    defer file.close();
+
+    var w_buf: [4096]u8 = undefined;
+    var w: std.io.Writer = .fixed(&w_buf);
+    var r_buf: [4096]u8 = undefined;
+    var fr = file.reader(&r_buf);
+    const r = &fr.interface;
+
+    while (true) {
+        _ = r.streamDelimiter(&w, DELIMITER) catch |err| switch (err) {
+            error.EndOfStream => break,
+            else => return err,
+        };
+        r.toss(1);
+        try w.flush();
+        std.debug.print("{s}\n", .{w.buffered()});
+        w.end = 0;
+    }
+
+    try accesspoint.bufferedPrint();
 }
