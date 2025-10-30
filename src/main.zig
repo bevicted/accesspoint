@@ -3,14 +3,17 @@ const builtin = @import("builtin");
 const accesspoint = @import("accesspoint");
 
 const Allocator = std.mem.Allocator;
+const Parsed = std.json.Parsed;
 
 const DELIMITER = if (builtin.os.tag == .windows) '\r' else '\n';
 
 const Entries = struct {
-    allocator: *const Allocator,
-    parsed: []std.json.Parsed(Entry),
+    const Self = @This();
+    allocator: Allocator,
+    parsed: []Parsed(EntryData),
+    //items: []Entry,
 
-    pub fn deinit(self: @This()) void {
+    pub fn deinit(self: Self) void {
         for (self.parsed) |p| {
             p.deinit();
         }
@@ -18,12 +21,17 @@ const Entries = struct {
     }
 };
 
-const Entry = struct {
+const EntryData = struct {
     name: ?[]u8 = null,
     url: ?[]u8 = null,
     id: ?[]u8 = null,
     tags: ?[][]u8 = null,
-    children: ?[]@This() = null,
+};
+
+const Entry = struct {
+    const Self = @This();
+    data: *const EntryData,
+    children: ?[]*Self = null,
 };
 
 pub fn main() !void {
@@ -52,8 +60,17 @@ fn parseFile(allocator: Allocator, path: []const u8) !Entries {
     };
     defer file.close();
 
-    var entries: std.ArrayList(std.json.Parsed(Entry)) = .empty;
-    defer entries.deinit(allocator);
+    var parsed: std.ArrayList(Parsed(EntryData)) = .empty;
+    defer parsed.deinit(allocator);
+
+    // var entries: std.ArrayList(Entry) = .empty;
+    // defer entries.deinit(allocator);
+
+    var queue: std.ArrayList(*Entry) = .empty;
+    defer queue.deinit(allocator);
+
+    var indents: std.ArrayList(usize) = .empty;
+    defer indents.deinit(allocator);
 
     var line_allocator: std.io.Writer.Allocating = .init(allocator);
     defer line_allocator.deinit();
@@ -73,19 +90,34 @@ fn parseFile(allocator: Allocator, path: []const u8) !Entries {
         std.debug.print("{s}\n", .{line});
         var indent: usize = 0;
         for (line) |char| {
-            switch (char) {
-                ' ' => indent += 1,
-                '\t' => indent += 4,
-                else => break,
+            if (char == ' ' or char == '\t') {
+                indent += 1;
+                continue;
             }
+            break;
         }
-        const parsed: std.json.Parsed(Entry) = try std.json.parseFromSlice(Entry, allocator, line[indent..], .{});
-        errdefer parsed.deinit();
-        try entries.append(allocator, parsed);
+        const data: Parsed(EntryData) = try std.json.parseFromSlice(EntryData, allocator, line[indent..], .{});
+        errdefer data.deinit();
+
+        try parsed.append(allocator, data);
+
+        var e = Entry{
+            .data = &data.value,
+        };
+
+        while (indents.items.len > 0 and indents.getLast() >= indent) {
+            _ = indents.pop();
+            _ = queue.pop();
+        }
+
+        try indents.append(allocator, indent);
+        try queue.append(allocator, &e);
+        //try entries.append(allocator, e);
     }
 
     return Entries{
-        .allocator = &allocator,
-        .parsed = try entries.toOwnedSlice(allocator),
+        .allocator = allocator,
+        .parsed = try parsed.toOwnedSlice(allocator),
+        //.items = try entries.toOwnedSlice(allocator),
     };
 }
