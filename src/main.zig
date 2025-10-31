@@ -31,7 +31,7 @@ const EntryData = struct {
 const Entry = struct {
     const Self = @This();
     data: *const EntryData,
-    children: ?[]*Self = null,
+    children: []*Self,
 };
 
 pub fn main() !void {
@@ -87,7 +87,7 @@ fn parseFile(allocator: Allocator, path: []const u8) !Entries {
         const line = line_allocator.written();
         line_allocator.clearRetainingCapacity();
 
-        std.debug.print("{s}\n", .{line});
+        std.debug.print("now processing: {s}\n", .{line});
         var indent: usize = 0;
         for (line) |char| {
             if (char == ' ' or char == '\t') {
@@ -103,11 +103,23 @@ fn parseFile(allocator: Allocator, path: []const u8) !Entries {
 
         var e = Entry{
             .data = &data.value,
+            .children = &[0]*Entry{},
         };
+        defer allocator.free(e.children);
 
         while (indents.items.len > 0 and indents.getLast() >= indent) {
             _ = indents.pop();
             _ = queue.pop();
+        }
+
+        if (queue.getLastOrNull()) |p| {
+            std.debug.print("has parent\n", .{});
+            if (p.data.name) |n|
+                std.debug.print("parent: {s}\n", .{n});
+            p.children = try std.mem.concat(allocator, *Entry, &.{ p.children, &.{&e} });
+            for (p.children) |c|
+                if (c.data.url) |n|
+                    std.debug.print("{s}\n", .{n});
         }
 
         try indents.append(allocator, indent);
