@@ -8,30 +8,24 @@ const Parsed = std.json.Parsed;
 const DELIMITER = if (builtin.os.tag == .windows) '\r' else '\n';
 
 const Entries = struct {
-    const Self = @This();
     allocator: Allocator,
-    parsed: []Parsed(EntryData),
-    //items: []Entry,
+    parsed: []Parsed(Entry),
+    children: [][]usize,
 
-    pub fn deinit(self: Self) void {
+    pub fn deinit(self: @This()) void {
         for (self.parsed) |p| {
             p.deinit();
         }
         self.allocator.free(self.parsed);
+        self.allocator.free(self.children);
     }
 };
 
-const EntryData = struct {
+const Entry = struct {
     name: ?[]u8 = null,
     url: ?[]u8 = null,
     id: ?[]u8 = null,
     tags: ?[][]u8 = null,
-};
-
-const Entry = struct {
-    const Self = @This();
-    data: *const EntryData,
-    children: []*Self,
 };
 
 pub fn main() !void {
@@ -45,14 +39,21 @@ pub fn main() !void {
     const entries = try parseFile(allocator, path);
     defer entries.deinit();
 
-    for (entries.parsed) |p| {
-        if (p.value.name) |name| {
-            std.debug.print("{s}\n", .{name});
-        }
+    for (0.., entries.parsed) |idx, p| {
+        std.debug.print("{s} has {d} children: ", .{ p.value.name orelse "nameless", entries.children[idx].len });
+        for (entries.children[idx]) |c|
+            std.debug.print("{d} ", .{c});
+        std.debug.print("\n", .{});
     }
 
     try accesspoint.bufferedPrint();
 }
+
+const QueuePos = struct {
+    idx: usize,
+    indent: u8,
+    children: std.ArrayList(usize),
+};
 
 fn parseFile(allocator: Allocator, path: []const u8) !Entries {
     const file = std.fs.cwd().openFile(path, .{ .mode = .read_only }) catch |err| {
@@ -60,17 +61,14 @@ fn parseFile(allocator: Allocator, path: []const u8) !Entries {
     };
     defer file.close();
 
-    var parsed: std.ArrayList(Parsed(EntryData)) = .empty;
+    var parsed: std.ArrayList(Parsed(Entry)) = .empty;
     defer parsed.deinit(allocator);
 
-    // var entries: std.ArrayList(Entry) = .empty;
-    // defer entries.deinit(allocator);
+    var children: std.ArrayList([]usize) = .empty;
+    defer children.deinit(allocator);
 
-    var queue: std.ArrayList(*Entry) = .empty;
+    var queue: std.ArrayList(QueuePos) = .empty;
     defer queue.deinit(allocator);
-
-    var indents: std.ArrayList(usize) = .empty;
-    defer indents.deinit(allocator);
 
     var line_allocator: std.io.Writer.Allocating = .init(allocator);
     defer line_allocator.deinit();
@@ -87,8 +85,8 @@ fn parseFile(allocator: Allocator, path: []const u8) !Entries {
         const line = line_allocator.written();
         line_allocator.clearRetainingCapacity();
 
-        std.debug.print("now processing: {s}\n", .{line});
-        var indent: usize = 0;
+        std.debug.print("line={s}\n", .{line});
+        var indent: u8 = 0;
         for (line) |char| {
             if (char == ' ' or char == '\t') {
                 indent += 1;
@@ -96,40 +94,43 @@ fn parseFile(allocator: Allocator, path: []const u8) !Entries {
             }
             break;
         }
-        const data: Parsed(EntryData) = try std.json.parseFromSlice(EntryData, allocator, line[indent..], .{});
+
+        const data: Parsed(Entry) = try std.json.parseFromSlice(Entry, allocator, line[indent..], .{});
         errdefer data.deinit();
-
         try parsed.append(allocator, data);
+        try children.append(allocator, &.{});
 
-        var e = Entry{
-            .data = &data.value,
-            .children = &[0]*Entry{},
-        };
-        defer allocator.free(e.children);
-
-        while (indents.items.len > 0 and indents.getLast() >= indent) {
-            _ = indents.pop();
+        while (queue.items.len > 0 and queue.getLast().indent >= indent) {
+            var c = queue.getLast().children;
+            children.items[queue.getLast().idx] = try c.toOwnedSlice(allocator);
             _ = queue.pop();
         }
 
-        if (queue.getLastOrNull()) |p| {
-            std.debug.print("has parent\n", .{});
-            if (p.data.name) |n|
-                std.debug.print("parent: {s}\n", .{n});
-            p.children = try std.mem.concat(allocator, *Entry, &.{ p.children, &.{&e} });
-            for (p.children) |c|
-                if (c.data.url) |n|
-                    std.debug.print("{s}\n", .{n});
+        if (queue.items.len > 0) {
+            var last = &queue.items[queue.items.len - 1];
+            try last.children.append(allocator, parsed.items.len - 1);
         }
 
-        try indents.append(allocator, indent);
-        try queue.append(allocator, &e);
-        //try entries.append(allocator, e);
+        var c: std.ArrayList(usize) = .empty;
+        defer c.deinit(allocator);
+        try queue.append(allocator, .{
+            .idx = parsed.items.len - 1,
+            .indent = indent,
+            .children = c,
+        });
     }
+
+    for (0..queue.items.len) |i| {
+        const idx = queue.items.len - 1 - i;
+        var pos = queue.items[idx];
+        children.items[pos.idx] = try pos.children.toOwnedSlice(allocator);
+    }
+    for (0.., children.items) |i, c|
+        std.debug.print("{d}: {d}\n", .{ i, c.len });
 
     return Entries{
         .allocator = allocator,
         .parsed = try parsed.toOwnedSlice(allocator),
-        //.items = try entries.toOwnedSlice(allocator),
+        .children = try children.toOwnedSlice(allocator),
     };
 }
