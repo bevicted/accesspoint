@@ -17,6 +17,8 @@ const Entries = struct {
             p.deinit();
         }
         self.allocator.free(self.parsed);
+        for (self.children) |c|
+            self.allocator.free(c);
         self.allocator.free(self.children);
     }
 };
@@ -101,8 +103,8 @@ fn parseFile(allocator: Allocator, path: []const u8) !Entries {
         try children.append(allocator, &.{});
 
         while (queue.items.len > 0 and queue.getLast().indent >= indent) {
-            var c = queue.getLast().children;
-            children.items[queue.getLast().idx] = try c.toOwnedSlice(allocator);
+            var last = &queue.items[queue.items.len - 1];
+            children.items[last.idx] = try last.children.toOwnedSlice(allocator);
             _ = queue.pop();
         }
 
@@ -111,22 +113,17 @@ fn parseFile(allocator: Allocator, path: []const u8) !Entries {
             try last.children.append(allocator, parsed.items.len - 1);
         }
 
-        var c: std.ArrayList(usize) = .empty;
-        defer c.deinit(allocator);
         try queue.append(allocator, .{
             .idx = parsed.items.len - 1,
             .indent = indent,
-            .children = c,
+            .children = .empty,
         });
     }
 
     for (0..queue.items.len) |i| {
-        const idx = queue.items.len - 1 - i;
-        var pos = queue.items[idx];
+        var pos = queue.items[queue.items.len - 1 - i];
         children.items[pos.idx] = try pos.children.toOwnedSlice(allocator);
     }
-    for (0.., children.items) |i, c|
-        std.debug.print("{d}: {d}\n", .{ i, c.len });
 
     return Entries{
         .allocator = allocator,
