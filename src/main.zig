@@ -80,12 +80,9 @@ fn parseFile(allocator: Allocator, path: []const u8) !Entries {
     const r: *std.io.Reader = &fr.interface;
 
     while (true) {
-        _ = r.streamDelimiter(&line_allocator.writer, DELIMITER) catch |err| {
+        const line = readLine(r, &line_allocator) catch |err| {
             if (err == error.EndOfStream) break else return err;
         };
-        r.toss(1);
-        const line = line_allocator.written();
-        line_allocator.clearRetainingCapacity();
 
         std.debug.print("line={s}\n", .{line});
         var indent: u8 = 0;
@@ -130,4 +127,13 @@ fn parseFile(allocator: Allocator, path: []const u8) !Entries {
         .parsed = try parsed.toOwnedSlice(allocator),
         .children = try children.toOwnedSlice(allocator),
     };
+}
+
+fn readLine(r: *std.io.Reader, line_allocator: *std.io.Writer.Allocating) std.io.Reader.StreamError![]u8 {
+    _ = try r.streamDelimiter(&line_allocator.writer, DELIMITER);
+    r.toss(1);
+    const line = line_allocator.written();
+    line_allocator.clearRetainingCapacity();
+
+    return line;
 }
