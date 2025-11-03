@@ -17,6 +17,7 @@ const Entries = struct {
             p.deinit();
         }
         self.allocator.free(self.parsed);
+
         for (self.children) |c|
             self.allocator.free(c);
         self.allocator.free(self.children);
