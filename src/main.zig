@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const accesspoint = @import("accesspoint");
+const tui = @import("tui.zig");
 
 const Allocator = std.mem.Allocator;
 const Parsed = std.json.Parsed;
@@ -48,6 +49,8 @@ pub fn main() !void {
             std.debug.print("{d} ", .{c});
         std.debug.print("\n", .{});
     }
+
+    try tui.run(allocator);
 
     try accesspoint.bufferedPrint();
 }
