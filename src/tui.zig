@@ -6,6 +6,7 @@ const Allocator = std.mem.Allocator;
 
 const Model = struct {
     list: std.ArrayList(vxfw.Text),
+    /// Memory owned by .arena
     filtered: std.ArrayList(vxfw.RichText),
     list_view: vxfw.ListView,
     text_field: vxfw.TextField,
@@ -27,12 +28,12 @@ const Model = struct {
         switch (event) {
             .init => {
                 // Initialize the filtered list
-                const allocator = self.arena.allocator();
+                const arena = self.arena.allocator();
                 for (self.list.items) |line| {
                     var spans = std.ArrayList(vxfw.RichText.TextSpan){};
                     const span: vxfw.RichText.TextSpan = .{ .text = line.text };
-                    try spans.append(allocator, span);
-                    try self.filtered.append(allocator, .{ .text = spans.items });
+                    try spans.append(arena, span);
+                    try self.filtered.append(arena, .{ .text = spans.items });
                 }
 
                 return ctx.requestFocus(self.text_field.widget());
@@ -101,8 +102,8 @@ const Model = struct {
     fn onChange(maybe_ptr: ?*anyopaque, _: *vxfw.EventContext, str: []const u8) anyerror!void {
         const ptr = maybe_ptr orelse return;
         const self: *Model = @ptrCast(@alignCast(ptr));
-        const allocator = self.arena.allocator();
-        self.filtered.clearAndFree(allocator);
+        const arena = self.arena.allocator();
+        self.filtered.clearAndFree(arena);
         _ = self.arena.reset(.free_all);
 
         const hasUpper = for (str) |b| {
@@ -116,7 +117,7 @@ const Model = struct {
             const tgt = if (hasUpper)
                 item.text
             else
-                try toLower(allocator, item.text);
+                try toLower(arena, item.text);
 
             var spans = std.ArrayList(vxfw.RichText.TextSpan){};
             var i: usize = 0;
@@ -128,14 +129,14 @@ const Model = struct {
                         .text = item.text[idx .. idx + g.len],
                         .style = .{ .fg = .{ .index = 4 }, .reverse = true },
                     };
-                    try spans.append(allocator, up_to_here);
-                    try spans.append(allocator, match);
+                    try spans.append(arena, up_to_here);
+                    try spans.append(arena, match);
                     i = idx + g.len;
                 } else continue :outer;
             }
             const up_to_here: vxfw.RichText.TextSpan = .{ .text = item.text[i..] };
-            try spans.append(allocator, up_to_here);
-            try self.filtered.append(allocator, .{ .text = spans.items });
+            try spans.append(arena, up_to_here);
+            try self.filtered.append(arena, .{ .text = spans.items });
         }
         self.list_view.scroll.top = 0;
         self.list_view.scroll.offset = 0;
@@ -195,7 +196,6 @@ pub fn run(allocator: Allocator) !void {
     defer {
         model.text_field.deinit();
         model.list.deinit(allocator);
-        model.filtered.deinit(allocator);
         model.arena.deinit();
     }
 
