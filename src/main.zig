@@ -1,6 +1,5 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const accesspoint = @import("accesspoint");
 const tui = @import("tui.zig");
 
 const Allocator = std.mem.Allocator;
@@ -51,8 +50,6 @@ pub fn main() !void {
     }
 
     try tui.run(allocator);
-
-    try accesspoint.bufferedPrint();
 }
 
 const QueuePos = struct {
