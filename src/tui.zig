@@ -17,6 +17,44 @@ const Model = struct {
     /// Used for filtered RichText Spans
     arena: std.heap.ArenaAllocator,
 
+    pub fn init(allocator: Allocator, ent: entries.Entries) !*Model {
+        const model = try allocator.create(Model);
+        model.* = .{
+            .list = .empty,
+            .filtered = .empty,
+            .list_view = .{
+                .children = .{
+                    .builder = .{
+                        .userdata = model,
+                        .buildFn = Model.widgetBuilder,
+                    },
+                },
+            },
+            .text_field = .{
+                .buf = vxfw.TextField.Buffer.init(allocator),
+                .userdata = model,
+                .onChange = Model.onChange,
+                .onSubmit = Model.onSubmit,
+            },
+            .entries = ent,
+            .result = "",
+            .arena = std.heap.ArenaAllocator.init(allocator),
+        };
+
+        for (ent.items) |parsed| {
+            try model.list.append(allocator, .{ .text = parsed.value.name orelse "nameless" });
+        }
+
+        return model;
+    }
+
+    pub fn deinit(self: *Model, allocator: Allocator) void {
+        self.text_field.deinit();
+        self.list.deinit(allocator);
+        self.arena.deinit();
+        allocator.destroy(self);
+    }
+
     pub fn widget(self: *Model) vxfw.Widget {
         return .{
             .userdata = self,
@@ -173,38 +211,8 @@ pub fn run(allocator: Allocator, ent: entries.Entries) !void {
     var app = try vxfw.App.init(allocator);
     errdefer app.deinit();
 
-    const model = try allocator.create(Model);
-    defer allocator.destroy(model);
-    model.* = .{
-        .list = .empty,
-        .filtered = .empty,
-        .list_view = .{
-            .children = .{
-                .builder = .{
-                    .userdata = model,
-                    .buildFn = Model.widgetBuilder,
-                },
-            },
-        },
-        .text_field = .{
-            .buf = vxfw.TextField.Buffer.init(allocator),
-            .userdata = model,
-            .onChange = Model.onChange,
-            .onSubmit = Model.onSubmit,
-        },
-        .entries = ent,
-        .result = "",
-        .arena = std.heap.ArenaAllocator.init(allocator),
-    };
-    defer {
-        model.text_field.deinit();
-        model.list.deinit(allocator);
-        model.arena.deinit();
-    }
-
-    for (ent.items) |parsed| {
-        try model.list.append(allocator, .{ .text = parsed.value.name orelse "nameless" });
-    }
+    const model: *Model = try .init(allocator, ent);
+    defer model.deinit(allocator);
 
     try app.run(model.widget(), .{});
     app.deinit();
