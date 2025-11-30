@@ -5,14 +5,14 @@ const Parsed = std.json.Parsed;
 
 pub const Entries = struct {
     allocator: Allocator,
-    parsed: []Parsed(Entry),
+    items: []Parsed(Entry),
     children: [][]usize,
 
     pub fn deinit(self: @This()) void {
-        for (self.parsed) |p| {
+        for (self.items) |p| {
             p.deinit();
         }
-        self.allocator.free(self.parsed);
+        self.allocator.free(self.items);
 
         for (self.children) |c|
             self.allocator.free(c);

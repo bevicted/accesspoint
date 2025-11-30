@@ -80,7 +80,7 @@ pub fn parseFile(allocator: Allocator, path: []const u8) !entries.Entries {
 
     return entries.Entries{
         .allocator = allocator,
-        .parsed = try parsed.toOwnedSlice(allocator),
+        .items = try parsed.toOwnedSlice(allocator),
         .children = try children.toOwnedSlice(allocator),
     };
 }

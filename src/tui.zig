@@ -2,6 +2,7 @@ const std = @import("std");
 const vaxis = @import("vaxis");
 const vxfw = vaxis.vxfw;
 
+const entries = @import("entries.zig");
 const Allocator = std.mem.Allocator;
 
 const Model = struct {
@@ -10,6 +11,7 @@ const Model = struct {
     filtered: std.ArrayList(vxfw.RichText),
     list_view: vxfw.ListView,
     text_field: vxfw.TextField,
+    entries: entries.Entries,
     result: []const u8,
 
     /// Used for filtered RichText Spans
@@ -23,14 +25,14 @@ const Model = struct {
         };
     }
 
-    fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anyerror!void {
+    fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) !void {
         const self: *Model = @ptrCast(@alignCast(ptr));
         switch (event) {
             .init => {
                 // Initialize the filtered list
                 const arena = self.arena.allocator();
                 for (self.list.items) |line| {
-                    var spans = std.ArrayList(vxfw.RichText.TextSpan){};
+                    var spans: std.ArrayList(vxfw.RichText.TextSpan) = .empty;
                     const span: vxfw.RichText.TextSpan = .{ .text = line.text };
                     try spans.append(arena, span);
                     try self.filtered.append(arena, .{ .text = spans.items });
@@ -167,15 +169,15 @@ fn toLower(allocator: Allocator, src: []const u8) std.mem.Allocator.Error![]cons
     return lower;
 }
 
-pub fn run(allocator: Allocator) !void {
+pub fn run(allocator: Allocator, ent: entries.Entries) !void {
     var app = try vxfw.App.init(allocator);
     errdefer app.deinit();
 
     const model = try allocator.create(Model);
     defer allocator.destroy(model);
     model.* = .{
-        .list = std.ArrayList(vxfw.Text){},
-        .filtered = std.ArrayList(vxfw.RichText){},
+        .list = .empty,
+        .filtered = .empty,
         .list_view = .{
             .children = .{
                 .builder = .{
@@ -190,6 +192,7 @@ pub fn run(allocator: Allocator) !void {
             .onChange = Model.onChange,
             .onSubmit = Model.onSubmit,
         },
+        .entries = ent,
         .result = "",
         .arena = std.heap.ArenaAllocator.init(allocator),
     };
@@ -199,22 +202,8 @@ pub fn run(allocator: Allocator) !void {
         model.arena.deinit();
     }
 
-    // Run the command
-    var fd = std.process.Child.init(&.{"fd"}, allocator);
-    fd.stdout_behavior = .Pipe;
-    fd.stderr_behavior = .Pipe;
-    var stdout = std.ArrayList(u8){};
-    var stderr = std.ArrayList(u8){};
-    defer stdout.deinit(allocator);
-    defer stderr.deinit(allocator);
-    try fd.spawn();
-    try fd.collectOutput(allocator, &stdout, &stderr, 10_000_000);
-    _ = try fd.wait();
-
-    var iter = std.mem.splitScalar(u8, stdout.items, '\n');
-    while (iter.next()) |line| {
-        if (line.len == 0) continue;
-        try model.list.append(allocator, .{ .text = line });
+    for (ent.items) |parsed| {
+        try model.list.append(allocator, .{ .text = parsed.value.name orelse "nameless" });
     }
 
     try app.run(model.widget(), .{});
