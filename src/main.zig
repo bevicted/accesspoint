@@ -15,12 +15,5 @@ pub fn main() !void {
     const entries = try parser.parseFile(allocator, path);
     defer entries.deinit();
 
-    for (0.., entries.items) |idx, p| {
-        std.debug.print("{s} has {d} children: ", .{ p.value.name orelse "nameless", entries.children[idx].len });
-        for (entries.children[idx]) |c|
-            std.debug.print("{d} ", .{c});
-        std.debug.print("\n", .{});
-    }
-
     try tui.run(allocator, entries);
 }

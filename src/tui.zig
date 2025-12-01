@@ -41,8 +41,8 @@ const Model = struct {
             .arena = std.heap.ArenaAllocator.init(allocator),
         };
 
-        for (ent.items) |parsed| {
-            try model.list.append(allocator, .{ .text = parsed.value.name orelse "nameless" });
+        for (ent.items) |e| {
+            try model.list.append(allocator, .{ .text = e.name orelse "nameless" });
         }
 
         return model;

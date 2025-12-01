@@ -1,22 +1,21 @@
 const std = @import("std");
 
-const Allocator = std.mem.Allocator;
-const Parsed = std.json.Parsed;
-
 pub const Entries = struct {
-    allocator: Allocator,
-    items: []Parsed(Entry),
+    arena: *std.heap.ArenaAllocator,
+    items: []Entry,
     children: [][]usize,
 
     pub fn deinit(self: @This()) void {
-        for (self.items) |p| {
-            p.deinit();
-        }
-        self.allocator.free(self.items);
+        const allocator = self.arena.child_allocator;
+        self.arena.deinit();
 
-        for (self.children) |c|
-            self.allocator.free(c);
-        self.allocator.free(self.children);
+        allocator.free(self.items);
+        for (self.children) |c| {
+            allocator.free(c);
+        }
+        allocator.free(self.children);
+
+        allocator.destroy(self.arena);
     }
 };
 

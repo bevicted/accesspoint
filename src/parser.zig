@@ -3,11 +3,10 @@ const builtin = @import("builtin");
 const entries = @import("entries.zig");
 
 const Allocator = std.mem.Allocator;
-const Parsed = std.json.Parsed;
 
 const DELIMITER = if (builtin.os.tag == .windows) '\r' else '\n';
 
-const QueuePos = struct {
+const StackPos = struct {
     idx: usize,
     indent: u8,
     children: std.ArrayList(usize),
@@ -19,14 +18,20 @@ pub fn parseFile(allocator: Allocator, path: []const u8) !entries.Entries {
     };
     defer file.close();
 
-    var parsed: std.ArrayList(Parsed(entries.Entry)) = .empty;
-    defer parsed.deinit(allocator);
+    var arena = try allocator.create(std.heap.ArenaAllocator);
+    errdefer allocator.destroy(arena);
+    arena.* = .init(allocator);
+    errdefer arena.deinit();
+    const arena_allocator = arena.allocator();
+
+    var entry_list: std.ArrayList(entries.Entry) = .empty;
+    errdefer entry_list.deinit(allocator);
 
     var children: std.ArrayList([]usize) = .empty;
     defer children.deinit(allocator);
 
-    var queue: std.ArrayList(QueuePos) = .empty;
-    defer queue.deinit(allocator);
+    var stack: std.ArrayList(StackPos) = .empty;
+    defer stack.deinit(allocator);
 
     var line_allocator: std.io.Writer.Allocating = .init(allocator);
     defer line_allocator.deinit();
@@ -40,7 +45,6 @@ pub fn parseFile(allocator: Allocator, path: []const u8) !entries.Entries {
             if (err == error.EndOfStream) break else return err;
         };
 
-        std.debug.print("line={s}\n", .{line});
         var indent: u8 = 0;
         for (line) |char| {
             if (char == ' ' or char == '\t') {
@@ -50,37 +54,36 @@ pub fn parseFile(allocator: Allocator, path: []const u8) !entries.Entries {
             break;
         }
 
-        const data: Parsed(entries.Entry) = try std.json.parseFromSlice(entries.Entry, allocator, line[indent..], .{});
-        errdefer data.deinit();
-        try parsed.append(allocator, data);
+        const data: entries.Entry = try std.json.parseFromSliceLeaky(entries.Entry, arena_allocator, line[indent..], .{});
+        try entry_list.append(allocator, data);
         try children.append(allocator, &.{});
 
-        while (queue.items.len > 0 and queue.getLast().indent >= indent) {
-            var last = &queue.items[queue.items.len - 1];
+        while (stack.items.len > 0 and stack.getLast().indent >= indent) {
+            var last = &stack.items[stack.items.len - 1];
             children.items[last.idx] = try last.children.toOwnedSlice(allocator);
-            _ = queue.pop();
+            _ = stack.pop();
         }
 
-        if (queue.items.len > 0) {
-            var last = &queue.items[queue.items.len - 1];
-            try last.children.append(allocator, parsed.items.len - 1);
+        if (stack.items.len > 0) {
+            var last = &stack.items[stack.items.len - 1];
+            try last.children.append(allocator, entry_list.items.len - 1);
         }
 
-        try queue.append(allocator, .{
-            .idx = parsed.items.len - 1,
+        try stack.append(allocator, .{
+            .idx = entry_list.items.len - 1,
             .indent = indent,
             .children = .empty,
         });
     }
 
-    for (0..queue.items.len) |i| {
-        var pos = queue.items[queue.items.len - 1 - i];
+    for (0..stack.items.len) |i| {
+        var pos = stack.items[stack.items.len - 1 - i];
         children.items[pos.idx] = try pos.children.toOwnedSlice(allocator);
     }
 
     return entries.Entries{
-        .allocator = allocator,
-        .items = try parsed.toOwnedSlice(allocator),
+        .arena = arena,
+        .items = try entry_list.toOwnedSlice(allocator),
         .children = try children.toOwnedSlice(allocator),
     };
 }
