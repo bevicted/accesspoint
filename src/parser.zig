@@ -25,10 +25,15 @@ pub fn parseFile(allocator: Allocator, path: []const u8) !entries.Entries {
     const arena_allocator = arena.allocator();
 
     var entry_list: std.ArrayList(entries.Entry) = .empty;
-    errdefer entry_list.deinit(allocator);
+    defer entry_list.deinit(allocator);
 
     var children: std.ArrayList([]usize) = .empty;
-    defer children.deinit(allocator);
+    defer {
+        for (children.items) |c| {
+            allocator.free(c);
+        }
+        children.deinit(allocator);
+    }
 
     var stack: std.ArrayList(StackPos) = .empty;
     defer stack.deinit(allocator);
@@ -81,11 +86,16 @@ pub fn parseFile(allocator: Allocator, path: []const u8) !entries.Entries {
         children.items[pos.idx] = try pos.children.toOwnedSlice(allocator);
     }
 
-    return entries.Entries{
+    const res = entries.Entries{
         .arena = arena,
-        .items = try entry_list.toOwnedSlice(allocator),
-        .children = try children.toOwnedSlice(allocator),
+        .items = try arena_allocator.alloc(entries.Entry, entry_list.items.len),
+        .children = try arena_allocator.alloc([]usize, children.items.len),
     };
+
+    @memmove(res.items, entry_list.items);
+    @memmove(res.children, children.items);
+
+    return res;
 }
 
 fn readLine(r: *std.io.Reader, line_allocator: *std.io.Writer.Allocating) std.io.Reader.StreamError![]u8 {

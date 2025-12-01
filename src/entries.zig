@@ -8,13 +8,6 @@ pub const Entries = struct {
     pub fn deinit(self: @This()) void {
         const allocator = self.arena.child_allocator;
         self.arena.deinit();
-
-        allocator.free(self.items);
-        for (self.children) |c| {
-            allocator.free(c);
-        }
-        allocator.free(self.children);
-
         allocator.destroy(self.arena);
     }
 };
