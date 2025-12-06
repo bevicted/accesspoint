@@ -4,6 +4,7 @@ pub const Entries = struct {
     arena: *std.heap.ArenaAllocator,
     items: []Entry,
     children: [][]usize,
+    parents: []?usize,
 
     pub fn deinit(self: @This()) void {
         const allocator = self.arena.child_allocator;

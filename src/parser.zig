@@ -35,6 +35,9 @@ pub fn parseFile(allocator: Allocator, path: []const u8) !entries.Entries {
         children.deinit(allocator);
     }
 
+    var parents: std.ArrayList(?usize) = .empty;
+    defer parents.deinit(allocator);
+
     var stack: std.ArrayList(StackPos) = .empty;
     defer stack.deinit(allocator);
 
@@ -62,6 +65,7 @@ pub fn parseFile(allocator: Allocator, path: []const u8) !entries.Entries {
         const data: entries.Entry = try std.json.parseFromSliceLeaky(entries.Entry, arena_allocator, line[indent..], .{});
         try entry_list.append(allocator, data);
         try children.append(allocator, &.{});
+        try parents.append(allocator, null);
 
         while (stack.items.len > 0 and stack.getLast().indent >= indent) {
             var last = &stack.items[stack.items.len - 1];
@@ -72,6 +76,7 @@ pub fn parseFile(allocator: Allocator, path: []const u8) !entries.Entries {
         if (stack.items.len > 0) {
             var last = &stack.items[stack.items.len - 1];
             try last.children.append(allocator, entry_list.items.len - 1);
+            parents.items[parents.items.len - 1] = entry_list.items.len - 1;
         }
 
         try stack.append(allocator, .{
@@ -90,10 +95,12 @@ pub fn parseFile(allocator: Allocator, path: []const u8) !entries.Entries {
         .arena = arena,
         .items = try arena_allocator.alloc(entries.Entry, entry_list.items.len),
         .children = try arena_allocator.alloc([]usize, children.items.len),
+        .parents = try arena_allocator.alloc(?usize, parents.items.len),
     };
 
     @memmove(res.items, entry_list.items);
     @memmove(res.children, children.items);
+    @memmove(res.parents, parents.items);
 
     return res;
 }
