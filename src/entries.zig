@@ -3,7 +3,6 @@ const std = @import("std");
 pub const Entries = struct {
     arena: *std.heap.ArenaAllocator,
     items: []Entry,
-    children: [][]usize,
     parents: []?usize,
 
     pub fn deinit(self: @This()) void {
