@@ -1,7 +1,9 @@
 const std = @import("std");
+const builtin = @import("builtin");
+const Allocator = std.mem.Allocator;
+
 const vaxis = @import("vaxis");
 const vxfw = vaxis.vxfw;
-const Allocator = std.mem.Allocator;
 const TextSpan = vxfw.RichText.TextSpan;
 
 const entries = @import("entries.zig");
@@ -231,8 +233,27 @@ pub fn run(allocator: Allocator, ent: entries.Entries) !void {
     try app.run(model.widget(), .{});
     app.deinit();
 
-    if (model.target_url) |url| {
-        _ = try std.posix.write(std.posix.STDOUT_FILENO, url);
-        _ = try std.posix.write(std.posix.STDOUT_FILENO, "\n");
+    if (model.target_url == null) {
+        return;
+    }
+
+    _ = try std.posix.write(std.posix.STDOUT_FILENO, model.target_url.?);
+    _ = try std.posix.write(std.posix.STDOUT_FILENO, "\n");
+
+    const cmd: []const u8 = switch (builtin.os.tag) {
+        .linux => "xdg-open",
+        .macos => "open",
+        else => return error.UnsupportedPlatform,
+    };
+
+    const run_result = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &[_][]const u8{ cmd, model.target_url.? },
+    });
+    defer allocator.free(run_result.stdout);
+    defer allocator.free(run_result.stderr);
+
+    if (run_result.term.Exited != 0) {
+        return error.CommandFailed;
     }
 }
