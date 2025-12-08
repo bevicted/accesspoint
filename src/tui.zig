@@ -79,7 +79,6 @@ const Model = struct {
                         self.current_parent = self.entries.parents[p];
                         try self.repopulate_list("");
                     }
-                    return;
                 }
 
                 return self.list_view.handleEvent(ctx, event);
