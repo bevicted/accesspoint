@@ -24,19 +24,9 @@ pub fn parseFile(allocator: Allocator, path: []const u8) !entries.Entries {
     errdefer arena.deinit();
     const arena_allocator = arena.allocator();
 
-    var entry_list: std.ArrayList(entries.Entry) = .empty;
-    defer entry_list.deinit(allocator);
-
+    var item_arr: std.ArrayList(entries.Entry) = .empty;
     var children: std.ArrayList([]usize) = .empty;
-    defer {
-        for (children.items) |c| {
-            allocator.free(c);
-        }
-        children.deinit(allocator);
-    }
-
     var parents: std.ArrayList(?usize) = .empty;
-    defer parents.deinit(allocator);
 
     var stack: std.ArrayList(StackPos) = .empty;
     defer stack.deinit(allocator);
@@ -63,44 +53,40 @@ pub fn parseFile(allocator: Allocator, path: []const u8) !entries.Entries {
         }
 
         const data: entries.Entry = try std.json.parseFromSliceLeaky(entries.Entry, arena_allocator, line[indent..], .{});
-        try entry_list.append(allocator, data);
-        try children.append(allocator, &.{});
-        try parents.append(allocator, null);
+        try item_arr.append(arena_allocator, data);
+        try children.append(arena_allocator, &.{});
+        try parents.append(arena_allocator, null);
 
         while (stack.items.len > 0 and stack.getLast().indent >= indent) {
             var last = &stack.items[stack.items.len - 1];
-            children.items[last.idx] = try last.children.toOwnedSlice(allocator);
+            children.items[last.idx] = try last.children.toOwnedSlice(arena_allocator);
             _ = stack.pop();
         }
 
         if (stack.items.len > 0) {
             var last = &stack.items[stack.items.len - 1];
-            try last.children.append(allocator, entry_list.items.len - 1);
-            parents.items[parents.items.len - 1] = entry_list.items.len - 1;
+            try last.children.append(arena_allocator, item_arr.items.len - 1);
+            parents.items[parents.items.len - 1] = item_arr.items.len - 1;
         }
 
         try stack.append(allocator, .{
-            .idx = entry_list.items.len - 1,
+            .idx = item_arr.items.len - 1,
             .indent = indent,
             .children = .empty,
         });
     }
 
     for (0..stack.items.len) |i| {
-        var pos = stack.items[stack.items.len - 1 - i];
-        children.items[pos.idx] = try pos.children.toOwnedSlice(allocator);
+        var last = stack.items[stack.items.len - 1 - i];
+        children.items[last.idx] = try last.children.toOwnedSlice(arena_allocator);
     }
 
     const res = entries.Entries{
         .arena = arena,
-        .items = try arena_allocator.alloc(entries.Entry, entry_list.items.len),
-        .children = try arena_allocator.alloc([]usize, children.items.len),
-        .parents = try arena_allocator.alloc(?usize, parents.items.len),
+        .items = try item_arr.toOwnedSlice(arena_allocator),
+        .children = try children.toOwnedSlice(arena_allocator),
+        .parents = try parents.toOwnedSlice(arena_allocator),
     };
-
-    @memmove(res.items, entry_list.items);
-    @memmove(res.children, children.items);
-    @memmove(res.parents, parents.items);
 
     return res;
 }

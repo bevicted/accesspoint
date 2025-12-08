@@ -5,22 +5,22 @@ const vxfw = vaxis.vxfw;
 const entries = @import("entries.zig");
 const Allocator = std.mem.Allocator;
 
+const DisplayItem = struct {
+    rich_text: vxfw.RichText,
+    idx: usize,
+};
+
 const Model = struct {
-    list: std.ArrayList(vxfw.Text),
-    /// Memory owned by .arena
-    filtered: std.ArrayList(vxfw.RichText),
+    arena: std.heap.ArenaAllocator,
+    filtered: std.ArrayList(DisplayItem),
     list_view: vxfw.ListView,
     text_field: vxfw.TextField,
     entries: entries.Entries,
-    result: []const u8,
-
-    /// Used for filtered RichText Spans
-    arena: std.heap.ArenaAllocator,
+    current_parent: ?usize,
 
     pub fn init(allocator: Allocator, ent: entries.Entries) !*Model {
         const model = try allocator.create(Model);
         model.* = .{
-            .list = .empty,
             .filtered = .empty,
             .list_view = .{
                 .children = .{
@@ -37,22 +37,15 @@ const Model = struct {
                 .onSubmit = Model.onSubmit,
             },
             .entries = ent,
-            .result = "",
             .arena = std.heap.ArenaAllocator.init(allocator),
+            .current_parent = null,
         };
-
-        for (0.., ent.items) |i, e| {
-            if (ent.parents[i] == null) {
-                try model.list.append(allocator, .{ .text = e.name orelse "nameless" });
-            }
-        }
 
         return model;
     }
 
     pub fn deinit(self: *Model, allocator: Allocator) void {
         self.text_field.deinit();
-        self.list.deinit(allocator);
         self.arena.deinit();
         allocator.destroy(self);
     }
@@ -69,13 +62,21 @@ const Model = struct {
         const self: *Model = @ptrCast(@alignCast(ptr));
         switch (event) {
             .init => {
-                // Initialize the filtered list
                 const arena = self.arena.allocator();
-                for (self.list.items) |line| {
-                    var spans: std.ArrayList(vxfw.RichText.TextSpan) = .empty;
-                    const span: vxfw.RichText.TextSpan = .{ .text = line.text };
-                    try spans.append(arena, span);
-                    try self.filtered.append(arena, .{ .text = spans.items });
+
+                for (0..self.entries.items.len) |idx| {
+                    if (self.entries.parents[idx] == self.current_parent) {
+                        var spans: std.ArrayList(vxfw.RichText.TextSpan) = .empty;
+                        const e = self.entries.items[idx];
+                        const span: vxfw.RichText.TextSpan = .{
+                            .text = e.name orelse e.url orelse "nameless",
+                        };
+                        try spans.append(arena, span);
+                        try self.filtered.append(arena, .{
+                            .rich_text = .{ .text = spans.items },
+                            .idx = idx,
+                        });
+                    }
                 }
 
                 return ctx.requestFocus(self.text_field.widget());
@@ -138,7 +139,7 @@ const Model = struct {
         const self: *const Model = @ptrCast(@alignCast(ptr));
         if (idx >= self.filtered.items.len) return null;
 
-        return self.filtered.items[idx].widget();
+        return self.filtered.items[idx].rich_text.widget();
     }
 
     fn onChange(maybe_ptr: ?*anyopaque, _: *vxfw.EventContext, str: []const u8) anyerror!void {
@@ -148,66 +149,73 @@ const Model = struct {
         self.filtered.clearAndFree(arena);
         _ = self.arena.reset(.free_all);
 
-        const hasUpper = for (str) |b| {
-            if (std.ascii.isUpper(b)) break true;
-        } else false;
-
         // Loop each line
         // If our input is only lowercase, we convert the line to lowercase
         // Iterate the input graphemes, looking for them _in order_ in the line
-        outer: for (self.list.items) |item| {
-            const tgt = if (hasUpper)
-                item.text
-            else
-                try toLower(arena, item.text);
+        outer: for (0.., self.entries.items) |idx, entry| {
+            if (self.entries.parents[idx] != self.current_parent) {
+                continue;
+            }
 
             var spans = std.ArrayList(vxfw.RichText.TextSpan){};
             var i: usize = 0;
             var iter = vaxis.unicode.graphemeIterator(str);
+            const text = entry.name orelse entry.url.?;
             while (iter.next()) |g| {
-                if (std.mem.indexOfPos(u8, tgt, i, g.bytes(str))) |idx| {
-                    const up_to_here: vxfw.RichText.TextSpan = .{ .text = item.text[i..idx] };
+                if (std.mem.indexOfPos(u8, text, i, g.bytes(str))) |byte_pos| {
+                    const up_to_here: vxfw.RichText.TextSpan = .{ .text = text[i..byte_pos] };
                     const match: vxfw.RichText.TextSpan = .{
-                        .text = item.text[idx .. idx + g.len],
+                        .text = text[byte_pos .. byte_pos + g.len],
                         .style = .{ .fg = .{ .index = 4 }, .reverse = true },
                     };
                     try spans.append(arena, up_to_here);
                     try spans.append(arena, match);
-                    i = idx + g.len;
+                    i = byte_pos + g.len;
                 } else continue :outer;
             }
-            const up_to_here: vxfw.RichText.TextSpan = .{ .text = item.text[i..] };
+            const up_to_here: vxfw.RichText.TextSpan = .{ .text = text[i..] };
             try spans.append(arena, up_to_here);
-            try self.filtered.append(arena, .{ .text = spans.items });
+            try self.filtered.append(arena, .{
+                .rich_text = .{ .text = spans.items },
+                .idx = idx,
+            });
         }
         self.list_view.scroll.top = 0;
         self.list_view.scroll.offset = 0;
         self.list_view.cursor = 0;
     }
 
-    fn onSubmit(maybe_ptr: ?*anyopaque, ctx: *vxfw.EventContext, _: []const u8) anyerror!void {
+    fn onSubmit(maybe_ptr: ?*anyopaque, ctx: *vxfw.EventContext, _: []const u8) !void {
         const ptr = maybe_ptr orelse return;
         const self: *Model = @ptrCast(@alignCast(ptr));
-        if (self.list_view.cursor < self.filtered.items.len) {
-            const selected = self.filtered.items[self.list_view.cursor];
-            const allocator = self.arena.allocator();
-            var result = std.ArrayList(u8){};
-            for (selected.text) |span| {
-                try result.appendSlice(allocator, span.text);
-            }
-            self.result = result.items;
+        const arena = self.arena.allocator();
+
+        if (self.list_view.cursor > self.filtered.items.len) {
+            return;
         }
-        ctx.quit = true;
+
+        const selected = self.filtered.items[self.list_view.cursor].idx;
+        if (self.entries.children[selected].len < 0) {
+            _ = try std.posix.write(std.posix.STDOUT_FILENO, self.entries.items[selected].url orelse "urlless");
+            _ = try std.posix.write(std.posix.STDOUT_FILENO, "\n");
+            ctx.quit = true;
+            return;
+        }
+
+        for (self.entries.children[selected]) |c| {
+            var spans: std.ArrayList(vxfw.RichText.TextSpan) = .empty;
+            const e = self.entries.items[c];
+            const span: vxfw.RichText.TextSpan = .{
+                .text = e.name orelse e.url orelse "nameless",
+            };
+            try spans.append(arena, span);
+            try self.filtered.append(arena, .{
+                .rich_text = .{ .text = spans.items },
+                .idx = c,
+            });
+        }
     }
 };
-
-fn toLower(allocator: Allocator, src: []const u8) std.mem.Allocator.Error![]const u8 {
-    const lower = try allocator.alloc(u8, src.len);
-    for (src, 0..) |b, i| {
-        lower[i] = std.ascii.toLower(b);
-    }
-    return lower;
-}
 
 pub fn run(allocator: Allocator, ent: entries.Entries) !void {
     var app = try vxfw.App.init(allocator);
@@ -218,11 +226,4 @@ pub fn run(allocator: Allocator, ent: entries.Entries) !void {
 
     try app.run(model.widget(), .{});
     app.deinit();
-
-    if (model.result.len > 0) {
-        _ = try std.posix.write(std.posix.STDOUT_FILENO, model.result);
-        _ = try std.posix.write(std.posix.STDOUT_FILENO, "\n");
-    } else {
-        std.process.exit(130);
-    }
 }
