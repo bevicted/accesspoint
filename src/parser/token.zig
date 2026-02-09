@@ -1,14 +1,10 @@
 const std = @import("std");
 
-const TokenType = enum {
-    LEFT_PAREN,
-    RIGHT_PAREN,
+const TokenKind = enum {
     LEFT_BRACE,
     RIGHT_BRACE,
-    SEMICOLON,
     SLASH,
 
-    // One or two character tokens.
     EQUAL,
 
     // Literals.
@@ -16,25 +12,25 @@ const TokenType = enum {
     STRING,
 
     // Keywords.
-    AND,
-    FALSE,
-    OR,
+    LAYER,
+    LET,
+    OPEN,
     PRINT,
-    TRUE,
-    VAR,
+    RUN,
 
     EOF,
 };
 
 const Token = struct {
-    type: TokenType,
+    kind: TokenKind,
+    value: []const u8,
     lexeme: []const u8,
     literal: struct {},
-    line: i16,
+    line: u16,
 
     pub fn String(self: @This()) ![]const u8 {
         var b: []u8 = undefined;
-        try std.fmt.bufPrint(&b, "{} {} {}", .{ self.type, self.lexeme, self.literal });
+        try std.fmt.bufPrint(&b, "{} {} {}", .{ self.kind, self.lexeme, self.literal });
         return b;
     }
 };

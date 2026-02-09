@@ -1,43 +1,42 @@
-var var1 = some value
-var var2 = {var1} resolved
+let var1 = some value
+let var2 = {{var1}} resolved
+// this is a comment
 
-accesspoint {
-    tag repo
-    id ap
-    var repo = https://github.com/bevicted/accesspoint
-    repo {
-        open {repo}
+layer accesspoint {
+    let repo = https://github.com/bevicted/accesspoint
+
+    layer repo {
+        open {{repo}}
     }
-    issues {
-        open {repo}/issues
+    layer issues {
+        open {{repo}}/issues
     }
-    issue {
-        open {repo}/issues/{input}
+    layer issue {
+        open {{repo}}/issues/{{input}}
     }
 }
 
-some other repo {
-    tag repo
+layer multi word layer {
     open my other repo
 }
 
-kubectl {
-    tag cmd
-    tag some_other_tag
-    cmd = kubectl
-    help {
-        run {cmd} help
+layer kubectl {
+    let cmd = kubectl
+
+    layer help {
+        run {{cmd}} help
     }
-    pod {
-        pod = {input}
-        run {cmd} get pod {pod}
-        run {cmd} logs -f {pod}
+    layer pod {
+        input pod
+        run {{cmd}} get pod {{pod}}
+        run {{cmd}} logs -f {{pod}}
     }
-    get {
-        cmd = {cmd} get
-        pod {
-            cmd = {cmd} pod
-            run {cmd} {input}
+    layer get {
+        let cmd = {{cmd}} get
+        layer pod {
+            let cmd = {{cmd}} pod
+            input pod_cmd
+            run {{cmd}} {{pod_cmd}}
         }
     }
 }
