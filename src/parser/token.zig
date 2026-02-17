@@ -1,36 +1,26 @@
-const std = @import("std");
+kind: Kind,
+lexeme: []const u8,
+line: usize,
 
-const TokenKind = enum {
+const Kind = enum(u8) {
+    // Single-character
     LEFT_BRACE,
     RIGHT_BRACE,
     SLASH,
-
     EQUAL,
 
-    // Literals.
+    // Literals
     IDENTIFIER,
     STRING,
 
-    // Keywords.
+    // Keywords
     LAYER,
     LET,
     OPEN,
     PRINT,
     RUN,
 
+    // Specials
     EOF,
-};
-
-const Token = struct {
-    kind: TokenKind,
-    value: []const u8,
-    lexeme: []const u8,
-    literal: struct {},
-    line: u16,
-
-    pub fn String(self: @This()) ![]const u8 {
-        var b: []u8 = undefined;
-        try std.fmt.bufPrint(&b, "{} {} {}", .{ self.kind, self.lexeme, self.literal });
-        return b;
-    }
+    ERROR,
 };
