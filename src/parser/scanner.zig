@@ -22,8 +22,10 @@ const Scanner = struct {
         return self.current_token_end >= self.source.len;
     }
 
-    fn advance(self: Self) void {
+    fn advance(self: Self) u8 {
+        const c = self.get_current_char();
         self.current_token_end += 1;
+        return c;
     }
 
     fn get_current_char(self: Self) ?u8 {
@@ -85,7 +87,7 @@ const Scanner = struct {
         }
     }
 
-    fn match_keyword(self: Self, offset: usize, target: []const u8, target_kind: Token.Kind) Token.Kind {
+    fn exact_match_keyword(self: Self, offset: usize, target: []const u8, target_kind: Token.Kind) Token.Kind {
         std.debug.assert(target.len > offset);
         const source_slice = self.source[self.current_token_start + offset .. target.len - offset];
         return if (std.mem.eql(u8, source_slice, target[offset..])) target_kind else .IDENTIFIER;
@@ -94,12 +96,12 @@ const Scanner = struct {
     fn match_identifier(self: Self) Token.Kind {
         return switch (self.source[self.current_token_start]) {
             'l' => switch (self.source[self.current_token_start + 1]) {
-                'a' => self.match_keyword(2, "layer", .LAYER),
-                'e' => self.match_keyword(2, "let", .LET),
+                'a' => self.exact_match_keyword(2, "layer", .LAYER),
+                'e' => self.exact_match_keyword(2, "let", .LET),
             },
-            'o' => self.match_keyword(1, "open", .OPEN),
-            'p' => self.match_keyword(1, "print", .PRINT),
-            'r' => self.match_keyword(1, "run", .RUN),
+            'o' => self.exact_match_keyword(1, "open", .OPEN),
+            'p' => self.exact_match_keyword(1, "print", .PRINT),
+            'r' => self.exact_match_keyword(1, "run", .RUN),
             else => .IDENTIFIER,
         };
     }
@@ -107,6 +109,42 @@ const Scanner = struct {
     fn consume_identifier(self: Self) Token {
         while (is_alpha_numeric(self.get_current_char())) self.advance();
         return self.make_token(self.match_identifier());
+    }
+
+    fn consume_number(self: Self) Token {
+        while (is_digit(self.get_current_char())) self.advance();
+        return self.make_token(.NUMBER);
+    }
+
+    fn consume_string(self: Self) Token {
+        while (true) {
+            const c = self.get_current_char();
+            if (self.is_at_end() or c == '\n') return self.make_error("Unterminated string");
+            self.advance();
+            if (c == '"') return self.make_token(.STRING);
+        }
+    }
+
+    fn next(self: Self) Token {
+        self.skip_whitespace();
+        self.current_token_start = self.current_token_end;
+
+        if (self.is_at_end()) return self.make_token(.EOF);
+
+        const c = self.advance();
+
+        return switch (c) {
+            '{' => self.make_token(.LEFT_BRACE),
+            '}' => self.make_token(.RIGHT_BRACE),
+            '/' => self.make_token(.SLASH),
+            '=' => self.make_token(.EQUAL),
+            '"' => self.consume_string(),
+            else => switch (true) {
+                is_alpha(c) => self.consume_identifier(),
+                is_digit(c) => self.consume_number(),
+                else => self.make_error("Unexpected character"),
+            },
+        };
     }
 };
 

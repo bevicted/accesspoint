@@ -11,6 +11,7 @@ const Kind = enum(u8) {
 
     // Literals
     IDENTIFIER,
+    NUMBER,
     STRING,
 
     // Keywords
