@@ -17,7 +17,7 @@ pub fn init(source: []const u8) Self {
     };
 }
 
-fn is_at_end(self: Self) bool {
+inline fn is_at_end(self: Self) bool {
     return self.current_token_end >= self.source.len;
 }
 
