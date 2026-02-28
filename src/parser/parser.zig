@@ -3,20 +3,13 @@ const Token = @import("token.zig");
 const Scanner = @import("scanner.zig");
 const Self = @This();
 
-const ParseError = error{
-    ExpectedExpresion,
-    ExpectedLeftBrace,
-    ExpectedRightBrace,
-    ExpectedVariableName,
-};
-
-const Layer = struct {
-    name: []const u8,
-    sublayers: []usize,
-    instructions: [][]const u8,
+const Precedence = enum(u1) {
+    NONE,
+    ASSIGNMENT,
 };
 
 scanner: Scanner,
+previous: Token,
 current: Token,
 
 pub fn init(source: []const u8) Self {
@@ -26,16 +19,16 @@ pub fn init(source: []const u8) Self {
     };
 }
 
-inline fn check(self: *Self, kind: Token.Kind) bool {
+inline fn is_kind(self: *Self, kind: Token.Kind) bool {
     return self.current.kind == kind;
 }
 
-fn consume(self: *Self, kind: Token.Kind, err: ParseError) ParseError!Token {
-    if (self.check(kind)) {
-        return self.advance();
+fn advance(self: *Self) !void {
+    self.previous = self.current;
+
+    while (true) {
+        self.current = self.scanner.next();
+        if (!self.is_kind(.ERROR)) break;
+        try self.errorAtCurrent(self.current.lexeme);
     }
-
-    return err;
 }
-
-fn layer_declaration(self: *Self) !Layer {}
