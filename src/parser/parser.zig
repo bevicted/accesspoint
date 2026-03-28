@@ -23,6 +23,11 @@ const Error = error{
     OutOfMemory,
 };
 
+const Scope = struct {
+    vars: []const models.Variable,
+    parent: ?*const Scope,
+};
+
 pub fn parse(allocator: std.mem.Allocator, source: []const u8) Error!models.Layers {
     var arena = try allocator.create(std.heap.ArenaAllocator);
     errdefer allocator.destroy(arena);
@@ -46,7 +51,7 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) Error!models.Laye
     });
 
     try self.advance();
-    try self.parse_body(0, true, &.{});
+    try self.parse_body(0, true, null);
 
     return .{
         .arena = arena,
@@ -66,7 +71,7 @@ fn is_identifier_like(kind: Token.Kind) bool {
     };
 }
 
-fn parse_body(self: *Self, layer_index: usize, is_root: bool, parent_vars: []const models.Variable) Error!void {
+fn parse_body(self: *Self, layer_index: usize, is_root: bool, parent_scope: ?*const Scope) Error!void {
     var sublayers: std.ArrayList(usize) = .empty;
     var variables: std.ArrayList(models.Variable) = .empty;
     var instructions: std.ArrayList(models.Instruction) = .empty;
@@ -75,17 +80,20 @@ fn parse_body(self: *Self, layer_index: usize, is_root: bool, parent_vars: []con
         switch (self.current.kind) {
             .LAYER => {
                 try self.advance();
-                const idx = try self.parse_layer(layer_index, variables.items);
+                const scope = Scope{ .vars = variables.items, .parent = parent_scope };
+                const idx = try self.parse_layer(layer_index, &scope);
                 try sublayers.append(self.arena, idx);
             },
             .LET => {
                 try self.advance();
-                const v = try self.parse_let(layer_index, variables.items, parent_vars);
+                const scope = Scope{ .vars = variables.items, .parent = parent_scope };
+                const v = try self.parse_let(&scope);
                 try variables.append(self.arena, v);
             },
             .OPEN, .RUN, .PRINT => {
                 const kind = self.current.kind;
-                const instr = try self.parse_instruction(layer_index, kind, variables.items, parent_vars);
+                const scope = Scope{ .vars = variables.items, .parent = parent_scope };
+                const instr = try self.parse_instruction(kind, &scope);
                 try instructions.append(self.arena, instr);
             },
             .RIGHT_BRACE => {
@@ -115,7 +123,7 @@ fn parse_body(self: *Self, layer_index: usize, is_root: bool, parent_vars: []con
     self.layers.items[layer_index].instructions = try instructions.toOwnedSlice(self.arena);
 }
 
-fn parse_layer(self: *Self, parent_index: usize, parent_vars: []const models.Variable) Error!usize {
+fn parse_layer(self: *Self, parent_index: usize, parent_scope: *const Scope) Error!usize {
     // self.current is first token after LAYER keyword
     var name_parts: std.ArrayList([]const u8) = .empty;
     while (is_identifier_like(self.current.kind)) {
@@ -146,12 +154,12 @@ fn parse_layer(self: *Self, parent_index: usize, parent_vars: []const models.Var
         .instructions = &.{},
     });
 
-    try self.parse_body(new_index, false, parent_vars);
+    try self.parse_body(new_index, false, parent_scope);
 
     return new_index;
 }
 
-fn parse_let(self: *Self, layer_index: usize, current_vars: []const models.Variable, parent_vars: []const models.Variable) Error!models.Variable {
+fn parse_let(self: *Self, scope: *const Scope) Error!models.Variable {
     // self.current should be the variable name
     if (!is_identifier_like(self.current.kind)) {
         std.log.err("line {d}: expected variable name", .{self.current.line});
@@ -165,15 +173,15 @@ fn parse_let(self: *Self, layer_index: usize, current_vars: []const models.Varia
         return error.ExpectedEqual;
     }
 
-    const value = try self.resolve_value(layer_index, current_vars, parent_vars);
+    const value = try self.resolve_value(scope);
     try self.advance(); // prime next structural token
 
     return .{ .name = name, .value = value };
 }
 
-fn parse_instruction(self: *Self, layer_index: usize, kind: Token.Kind, current_vars: []const models.Variable, parent_vars: []const models.Variable) Error!models.Instruction {
+fn parse_instruction(self: *Self, kind: Token.Kind, scope: *const Scope) Error!models.Instruction {
     // self.current is OPEN/RUN/PRINT keyword
-    const value = try self.resolve_value(layer_index, current_vars, parent_vars);
+    const value = try self.resolve_value(scope);
     try self.advance(); // prime next structural token
 
     return switch (kind) {
@@ -184,7 +192,7 @@ fn parse_instruction(self: *Self, layer_index: usize, kind: Token.Kind, current_
     };
 }
 
-fn resolve_value(self: *Self, layer_index: usize, current_vars: []const models.Variable, parent_vars: []const models.Variable) Error![]const u8 {
+fn resolve_value(self: *Self, scope: *const Scope) Error![]const u8 {
     var buf: std.ArrayList(u8) = .empty;
 
     self.scanner.skip_spaces();
@@ -198,7 +206,7 @@ fn resolve_value(self: *Self, layer_index: usize, current_vars: []const models.V
                 if (!is_identifier_like(id.kind)) return error.ExpectedIdentifier;
                 const close = self.scanner.next();
                 if (close.kind != .DOUBLE_RIGHT_BRACE) return error.ExpectedDoubleRightBrace;
-                const resolved = self.lookup_variable(layer_index, id.lexeme, current_vars, parent_vars) orelse {
+                const resolved = self.lookup_variable(scope, id.lexeme) orelse {
                     std.log.err("line {d}: unresolved variable '{s}'", .{ id.line, id.lexeme });
                     return error.UnresolvedVariable;
                 };
@@ -212,23 +220,14 @@ fn resolve_value(self: *Self, layer_index: usize, current_vars: []const models.V
     return try buf.toOwnedSlice(self.arena);
 }
 
-fn lookup_variable(self: *Self, layer_index: usize, name: []const u8, current_vars: []const models.Variable, parent_vars: []const models.Variable) ?[]const u8 {
-    // First search the in-progress variables for the current layer
-    for (current_vars) |v| {
-        if (std.mem.eql(u8, v.name, name)) return v.value;
-    }
-    // Then search parent's in-progress variables
-    for (parent_vars) |v| {
-        if (std.mem.eql(u8, v.name, name)) return v.value;
-    }
-    // Then walk the parent chain (skip current layer since we already searched current_vars)
-    var idx: ?usize = self.layers.items[layer_index].parent;
-    while (idx) |i| {
-        const layer = self.layers.items[i];
-        for (layer.variables) |v| {
+fn lookup_variable(self: *Self, scope: *const Scope, name: []const u8) ?[]const u8 {
+    _ = self;
+    var current: ?*const Scope = scope;
+    while (current) |s| {
+        for (s.vars) |v| {
             if (std.mem.eql(u8, v.name, name)) return v.value;
         }
-        idx = layer.parent;
+        current = s.parent;
     }
     return null;
 }
@@ -489,4 +488,19 @@ test "parse full v2.ap" {
     // get > pod (index 10)
     try std.testing.expectEqualStrings("kubectl get pod", result.items[10].variables[0].value);
     try std.testing.expectEqualStrings("kubectl get pod describe", result.items[10].instructions[0].run);
+}
+
+test "grandparent variable lookup" {
+    const result = try parse(std.testing.allocator,
+        \\let root_var = from_root
+        \\layer a {
+        \\    layer b {
+        \\        layer c {
+        \\            open {{root_var}}
+        \\        }
+        \\    }
+        \\}
+    );
+    defer result.deinit();
+    try std.testing.expectEqualStrings("from_root", result.items[3].instructions[0].open);
 }
