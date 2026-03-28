@@ -186,7 +186,7 @@ fn parse_let(self: *Self, scope: *const Scope) Error!models.Variable {
         return error.ExpectedEqual;
     }
 
-    const value = try self.resolve_value(scope);
+    const value = try self.resolve_value(scope, .newline);
     try self.advance(); // prime next structural token
 
     return .{ .name = name, .value = value };
@@ -194,7 +194,7 @@ fn parse_let(self: *Self, scope: *const Scope) Error!models.Variable {
 
 fn parse_instruction(self: *Self, kind: Token.Kind, scope: *const Scope) Error!models.Instruction {
     // self.current is OPEN/RUN/PRINT keyword
-    const value = try self.resolve_value(scope);
+    const value = try self.resolve_value(scope, .newline);
     try self.advance(); // prime next structural token
 
     return switch (kind) {
@@ -205,13 +205,13 @@ fn parse_instruction(self: *Self, kind: Token.Kind, scope: *const Scope) Error!m
     };
 }
 
-fn resolve_value(self: *Self, scope: *const Scope) Error![]const u8 {
+fn resolve_value(self: *Self, scope: *const Scope, terminator: Scanner.Terminator) Error![]const u8 {
     var buf: std.ArrayList(u8) = .empty;
 
     self.scanner.skip_spaces();
 
     while (true) {
-        const tok = self.scanner.next_value();
+        const tok = self.scanner.next_value(terminator);
         switch (tok.kind) {
             .VALUE_TEXT => try buf.appendSlice(self.arena, tok.lexeme),
             .DOUBLE_LEFT_BRACE => {
@@ -225,7 +225,7 @@ fn resolve_value(self: *Self, scope: *const Scope) Error![]const u8 {
                 };
                 try buf.appendSlice(self.arena, resolved);
             },
-            .NEWLINE, .EOF => break,
+            .NEWLINE, .EOF, .LEFT_BRACE => break,
             else => return error.UnexpectedToken,
         }
     }
