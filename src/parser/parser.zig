@@ -43,7 +43,7 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) Error!models.Laye
 
     // Create root layer
     try self.layers.append(arena_alloc, .{
-        .name = "",
+        .name = "accesspoint",
         .parent = null,
         .sublayers = &.{},
         .variables = &.{},
@@ -51,7 +51,7 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) Error!models.Laye
     });
 
     try self.advance();
-    try self.parse_body(0, true, null);
+    try self.parse_body(0, true, null, "accesspoint");
 
     return .{
         .arena = arena,
@@ -71,10 +71,12 @@ fn is_identifier_like(kind: Token.Kind) bool {
     };
 }
 
-fn parse_body(self: *Self, layer_index: usize, is_root: bool, parent_scope: ?*const Scope) Error!void {
+fn parse_body(self: *Self, layer_index: usize, is_root: bool, parent_scope: ?*const Scope, layer_name: []const u8) Error!void {
     var sublayers: std.ArrayList(usize) = .empty;
     var variables: std.ArrayList(models.Variable) = .empty;
     var instructions: std.ArrayList(models.Instruction) = .empty;
+
+    try variables.append(self.arena, .{ .name = "layer_name", .value = layer_name });
 
     while (true) {
         switch (self.current.kind) {
@@ -147,7 +149,7 @@ fn parse_layer(self: *Self, parent_index: usize, parent_scope: *const Scope) Err
         .instructions = &.{},
     });
 
-    try self.parse_body(new_index, false, parent_scope);
+    try self.parse_body(new_index, false, parent_scope, name);
 
     return new_index;
 }
@@ -232,7 +234,7 @@ test "parse empty input" {
     const result = try parse(std.testing.allocator, "");
     defer result.deinit();
     try std.testing.expectEqual(@as(usize, 1), result.items.len);
-    try std.testing.expectEqualStrings("", result.items[0].name);
+    try std.testing.expectEqualStrings("accesspoint", result.items[0].name);
     try std.testing.expectEqual(@as(?usize, null), result.items[0].parent);
     try std.testing.expectEqual(@as(usize, 0), result.items[0].sublayers.len);
 }
@@ -295,9 +297,9 @@ test "parse let binding" {
         \\let x = hello world
     );
     defer result.deinit();
-    try std.testing.expectEqual(@as(usize, 1), result.items[0].variables.len);
-    try std.testing.expectEqualStrings("x", result.items[0].variables[0].name);
-    try std.testing.expectEqualStrings("hello world", result.items[0].variables[0].value);
+    try std.testing.expectEqual(@as(usize, 2), result.items[0].variables.len);
+    try std.testing.expectEqualStrings("x", result.items[0].variables[1].name);
+    try std.testing.expectEqualStrings("hello world", result.items[0].variables[1].value);
 }
 
 test "parse let with interpolation" {
@@ -306,8 +308,8 @@ test "parse let with interpolation" {
         \\let full = {{base}} world
     );
     defer result.deinit();
-    try std.testing.expectEqualStrings("hello", result.items[0].variables[0].value);
-    try std.testing.expectEqualStrings("hello world", result.items[0].variables[1].value);
+    try std.testing.expectEqualStrings("hello", result.items[0].variables[1].value);
+    try std.testing.expectEqualStrings("hello world", result.items[0].variables[2].value);
 }
 
 test "parse variable scope chain" {
@@ -318,7 +320,7 @@ test "parse variable scope chain" {
         \\}
     );
     defer result.deinit();
-    try std.testing.expectEqualStrings("parent_val extended", result.items[1].variables[0].value);
+    try std.testing.expectEqualStrings("parent_val extended", result.items[1].variables[1].value);
 }
 
 test "parse variable shadowing" {
@@ -338,8 +340,8 @@ test "parse let with keyword name" {
         \\let layer = myvalue
     );
     defer result.deinit();
-    try std.testing.expectEqualStrings("layer", result.items[0].variables[0].name);
-    try std.testing.expectEqualStrings("myvalue", result.items[0].variables[0].value);
+    try std.testing.expectEqualStrings("layer", result.items[0].variables[1].name);
+    try std.testing.expectEqualStrings("myvalue", result.items[0].variables[1].value);
 }
 
 test "parse open instruction" {
@@ -428,13 +430,13 @@ test "parse full v2.ap" {
 
     // Root (index 0)
     try std.testing.expectEqual(@as(usize, 3), result.items[0].sublayers.len);
-    try std.testing.expectEqualStrings("some value", result.items[0].variables[0].value);
-    try std.testing.expectEqualStrings("some value resolved", result.items[0].variables[1].value);
+    try std.testing.expectEqualStrings("some value", result.items[0].variables[1].value);
+    try std.testing.expectEqualStrings("some value resolved", result.items[0].variables[2].value);
 
     // accesspoint (index 1)
     try std.testing.expectEqualStrings("accesspoint", result.items[1].name);
     try std.testing.expectEqual(@as(usize, 3), result.items[1].sublayers.len);
-    try std.testing.expectEqualStrings("https://github.com/bevicted/accesspoint", result.items[1].variables[0].value);
+    try std.testing.expectEqualStrings("https://github.com/bevicted/accesspoint", result.items[1].variables[1].value);
 
     // repo (index 2)
     try std.testing.expectEqualStrings("https://github.com/bevicted/accesspoint", result.items[2].instructions[0].open);
@@ -461,10 +463,10 @@ test "parse full v2.ap" {
     try std.testing.expectEqualStrings("kubectl logs -f my-pod", result.items[8].instructions[1].run);
 
     // get (index 9)
-    try std.testing.expectEqualStrings("kubectl get", result.items[9].variables[0].value);
+    try std.testing.expectEqualStrings("kubectl get", result.items[9].variables[1].value);
 
     // get > pod (index 10)
-    try std.testing.expectEqualStrings("kubectl get pod", result.items[10].variables[0].value);
+    try std.testing.expectEqualStrings("kubectl get pod", result.items[10].variables[1].value);
     try std.testing.expectEqualStrings("kubectl get pod describe", result.items[10].instructions[0].run);
 }
 
@@ -530,4 +532,29 @@ test "same-scope redeclaration shadows earlier" {
     );
     defer result.deinit();
     try std.testing.expectEqualStrings("second", result.items[1].instructions[0].open);
+}
+
+test "root layer has implicit layer_name" {
+    const result = try parse(std.testing.allocator,
+        \\layer foo {
+        \\    open {{layer_name}}
+        \\}
+    );
+    defer result.deinit();
+    try std.testing.expectEqualStrings("accesspoint", result.items[0].name);
+    try std.testing.expectEqualStrings("layer_name", result.items[0].variables[0].name);
+    try std.testing.expectEqualStrings("accesspoint", result.items[0].variables[0].value);
+    try std.testing.expectEqualStrings("foo", result.items[1].instructions[0].open);
+}
+
+test "layer has implicit layer_name" {
+    const result = try parse(std.testing.allocator,
+        \\layer my-service {
+        \\    print {{layer_name}}
+        \\}
+    );
+    defer result.deinit();
+    try std.testing.expectEqualStrings("layer_name", result.items[1].variables[0].name);
+    try std.testing.expectEqualStrings("my-service", result.items[1].variables[0].value);
+    try std.testing.expectEqualStrings("my-service", result.items[1].instructions[0].print);
 }
