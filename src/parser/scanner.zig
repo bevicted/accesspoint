@@ -146,17 +146,25 @@ pub fn next(self: *Self) Token {
     return self.make_error("Unexpected character");
 }
 
-pub fn next_value(self: *Self) Token {
+pub const Terminator = enum { newline, left_brace };
+
+pub fn next_value(self: *Self, terminator: Terminator) Token {
     self.current_token_start = self.current_token_end;
 
     if (self.is_at_end()) return self.make_token(.EOF);
 
     const c = self.source[self.current_token_end];
 
-    if (c == '{' and self.peek_next() == '{') {
-        self.advance();
-        self.advance();
-        return self.make_token(.DOUBLE_LEFT_BRACE);
+    if (c == '{') {
+        if (self.peek_next() == '{') {
+            self.advance();
+            self.advance();
+            return self.make_token(.DOUBLE_LEFT_BRACE);
+        }
+        if (terminator == .left_brace) {
+            // Single { is our terminator — don't consume it
+            return self.make_token(.LEFT_BRACE);
+        }
     }
 
     if (c == '\n') {
@@ -165,11 +173,14 @@ pub fn next_value(self: *Self) Token {
         return self.make_token(.NEWLINE);
     }
 
-    // Consume VALUE_TEXT until {{ or \n or EOF
+    // Consume VALUE_TEXT until {{ or terminator or \n or EOF
     self.advance();
     while (self.peek()) |nc| {
         if (nc == '\n') break;
-        if (nc == '{' and self.peek_next() == '{') break;
+        if (nc == '{') {
+            if (self.peek_next() == '{') break;
+            if (terminator == .left_brace) break;
+        }
         self.advance();
     }
 
@@ -230,15 +241,15 @@ test "skip blank lines" {
 
 test "next_value plain text" {
     var s = Self.init("https://example.com/path\n");
-    const tok = s.next_value();
+    const tok = s.next_value(.newline);
     try std.testing.expectEqual(.VALUE_TEXT, tok.kind);
     try std.testing.expectEqualStrings("https://example.com/path", tok.lexeme);
-    try std.testing.expectEqual(.NEWLINE, s.next_value().kind);
+    try std.testing.expectEqual(.NEWLINE, s.next_value(.newline).kind);
 }
 
 test "next_value with interpolation" {
     var s = Self.init("{{var}}/path\n");
-    try std.testing.expectEqual(.DOUBLE_LEFT_BRACE, s.next_value().kind);
+    try std.testing.expectEqual(.DOUBLE_LEFT_BRACE, s.next_value(.newline).kind);
     // switch to next() for identifier inside interpolation
     const id = s.next();
     try std.testing.expectEqual(.IDENTIFIER, id.kind);
@@ -246,28 +257,61 @@ test "next_value with interpolation" {
     // switch to next() for closing }}
     try std.testing.expectEqual(.DOUBLE_RIGHT_BRACE, s.next().kind);
     // back to next_value for remaining text
-    const text = s.next_value();
+    const text = s.next_value(.newline);
     try std.testing.expectEqual(.VALUE_TEXT, text.kind);
     try std.testing.expectEqualStrings("/path", text.lexeme);
-    try std.testing.expectEqual(.NEWLINE, s.next_value().kind);
+    try std.testing.expectEqual(.NEWLINE, s.next_value(.newline).kind);
 }
 
 test "next_value empty" {
     var s = Self.init("\n");
-    try std.testing.expectEqual(.NEWLINE, s.next_value().kind);
+    try std.testing.expectEqual(.NEWLINE, s.next_value(.newline).kind);
 }
 
 test "next_value eof" {
     var s = Self.init("");
-    try std.testing.expectEqual(.EOF, s.next_value().kind);
+    try std.testing.expectEqual(.EOF, s.next_value(.newline).kind);
 }
 
 test "skip_spaces" {
     var s = Self.init("   hello\n");
     s.skip_spaces();
-    const tok = s.next_value();
+    const tok = s.next_value(.newline);
     try std.testing.expectEqual(.VALUE_TEXT, tok.kind);
     try std.testing.expectEqualStrings("hello", tok.lexeme);
+}
+
+test "next_value left_brace plain text" {
+    var s = Self.init("my-layer {");
+    const tok = s.next_value(.left_brace);
+    try std.testing.expectEqual(.VALUE_TEXT, tok.kind);
+    try std.testing.expectEqualStrings("my-layer ", tok.lexeme);
+    try std.testing.expectEqual(.LEFT_BRACE, s.next_value(.left_brace).kind);
+}
+
+test "next_value left_brace with interpolation" {
+    var s = Self.init("my-{{var}}-svc {");
+    const t1 = s.next_value(.left_brace);
+    try std.testing.expectEqual(.VALUE_TEXT, t1.kind);
+    try std.testing.expectEqualStrings("my-", t1.lexeme);
+    try std.testing.expectEqual(.DOUBLE_LEFT_BRACE, s.next_value(.left_brace).kind);
+    // variable name inside interpolation uses next()
+    const id = s.next();
+    try std.testing.expectEqual(.IDENTIFIER, id.kind);
+    try std.testing.expectEqualStrings("var", id.lexeme);
+    try std.testing.expectEqual(.DOUBLE_RIGHT_BRACE, s.next().kind);
+    const t2 = s.next_value(.left_brace);
+    try std.testing.expectEqual(.VALUE_TEXT, t2.kind);
+    try std.testing.expectEqualStrings("-svc ", t2.lexeme);
+    try std.testing.expectEqual(.LEFT_BRACE, s.next_value(.left_brace).kind);
+}
+
+test "next_value left_brace eof" {
+    var s = Self.init("no-brace");
+    const tok = s.next_value(.left_brace);
+    try std.testing.expectEqual(.VALUE_TEXT, tok.kind);
+    try std.testing.expectEqualStrings("no-brace", tok.lexeme);
+    try std.testing.expectEqual(.EOF, s.next_value(.left_brace).kind);
 }
 
 test "line tracking" {
