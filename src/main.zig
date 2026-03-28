@@ -16,15 +16,19 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
-    if (args.len < 2) {
-        const stderr = std.fs.File.stderr();
-        try stderr.writeAll("Usage: ap <file.ap>\n");
+    const path = if (args.len >= 2)
+        try allocator.dupe(u8, args[1])
+    else
+        resolveDefaultPath(allocator) catch |err| {
+            std.log.err("cannot resolve default config path: {}", .{err});
+            return;
+        };
+    defer allocator.free(path);
+
+    const source = std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024) catch |err| {
+        std.log.err("cannot open '{s}': {}", .{ path, err });
         return;
-    }
-
-    const path = args[1];
-
-    const source = try std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024);
+    };
     defer allocator.free(source);
 
     const layers = Parser.parse(allocator, source) catch |err| {
@@ -39,6 +43,16 @@ pub fn main() !void {
     defer allocator.free(instructions);
 
     execute_instructions(allocator, instructions);
+}
+
+fn resolveDefaultPath(allocator: Allocator) error{ HomeNotSet, OutOfMemory }![]const u8 {
+    const xdg = std.posix.getenv("XDG_CONFIG_HOME");
+    const config_base = xdg orelse blk: {
+        const home = std.posix.getenv("HOME") orelse return error.HomeNotSet;
+        break :blk try std.fs.path.join(allocator, &.{ home, ".config" });
+    };
+    defer if (xdg == null) allocator.free(config_base);
+    return try std.fs.path.join(allocator, &.{ config_base, "ap", "default.ap" });
 }
 
 fn collect_instructions(allocator: Allocator, layers: models.Layers, leaf_index: usize) ![]const models.Instruction {
