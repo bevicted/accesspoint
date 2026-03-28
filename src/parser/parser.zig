@@ -558,3 +558,40 @@ test "layer has implicit layer_name" {
     try std.testing.expectEqualStrings("my-service", result.items[1].variables[0].value);
     try std.testing.expectEqualStrings("my-service", result.items[1].instructions[0].print);
 }
+
+test "nested layers each get their own layer_name" {
+    const result = try parse(std.testing.allocator,
+        \\layer outer {
+        \\    layer inner {
+        \\        print {{layer_name}}
+        \\    }
+        \\}
+    );
+    defer result.deinit();
+    try std.testing.expectEqualStrings("outer", result.items[1].variables[0].value);
+    try std.testing.expectEqualStrings("inner", result.items[2].variables[0].value);
+    try std.testing.expectEqualStrings("inner", result.items[2].instructions[0].print);
+}
+
+test "explicit let shadows implicit layer_name" {
+    const result = try parse(std.testing.allocator,
+        \\layer original {
+        \\    let layer_name = override
+        \\    print {{layer_name}}
+        \\}
+    );
+    defer result.deinit();
+    try std.testing.expectEqualStrings("override", result.items[1].instructions[0].print);
+}
+
+test "interpolated layer name in layer_name variable" {
+    const result = try parse(std.testing.allocator,
+        \\let env = prod
+        \\layer my-{{env}}-service {
+        \\    print {{layer_name}}
+        \\}
+    );
+    defer result.deinit();
+    try std.testing.expectEqualStrings("my-prod-service", result.items[1].variables[0].value);
+    try std.testing.expectEqualStrings("my-prod-service", result.items[1].instructions[0].print);
+}
