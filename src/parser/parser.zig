@@ -112,7 +112,7 @@ fn parse_body(self: *Self, layer_index: usize, is_root: bool, parent_scope: ?*co
                 break;
             },
             else => {
-                std.log.err("line {d}: unexpected token", .{self.current.line});
+                std.log.err("line {d}: unexpected token '{s}'", .{ self.current.line, self.current.lexeme });
                 return error.UnexpectedToken;
             },
         }

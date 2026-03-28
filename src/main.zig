@@ -27,7 +27,10 @@ pub fn main() !void {
     const source = try std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024);
     defer allocator.free(source);
 
-    const layers = try Parser.parse(allocator, source);
+    const layers = Parser.parse(allocator, source) catch |err| {
+        if (err != error.OutOfMemory) return; // parser already logged the error
+        return err;
+    };
     defer layers.deinit();
 
     const selected = try tui.run(allocator, layers) orelse return;

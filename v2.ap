@@ -4,20 +4,22 @@ let var2 = {{var1}} resolved
 
 layer accesspoint {
     let repo = https://github.com/bevicted/accesspoint
+    print this is the
 
     layer repo {
+        print {{repo}} repo layer
         open {{repo}}
     }
     layer issues {
         open {{repo}}/issues
     }
-    layer issue {
-        open {{repo}}/issues/{{input}}
-    }
 }
 
-layer multi word layer {
-    open my other repo
+let mwl = multi word
+layer {{mwl}} layer {
+    print ===============================
+    print this is a {{mwl}} layer's print
+    print ===============================
 }
 
 layer kubectl {
@@ -27,7 +29,7 @@ layer kubectl {
         run {{cmd}} help
     }
     layer pod {
-        input pod
+        let pod = asd123
         run {{cmd}} get pod {{pod}}
         run {{cmd}} logs -f {{pod}}
     }
@@ -35,7 +37,7 @@ layer kubectl {
         let cmd = {{cmd}} get
         layer pod {
             let cmd = {{cmd}} pod
-            input pod_cmd
+            let pod_cmd = asd321
             run {{cmd}} {{pod_cmd}}
         }
     }
