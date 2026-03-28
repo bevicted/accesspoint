@@ -46,7 +46,7 @@ pub fn parse(allocator: std.mem.Allocator, source: []const u8) Error!models.Laye
     });
 
     try self.advance();
-    try self.parse_body(0, true);
+    try self.parse_body(0, true, &.{});
 
     return .{
         .arena = arena,
@@ -66,7 +66,7 @@ fn is_identifier_like(kind: Token.Kind) bool {
     };
 }
 
-fn parse_body(self: *Self, layer_index: usize, is_root: bool) Error!void {
+fn parse_body(self: *Self, layer_index: usize, is_root: bool, parent_vars: []const models.Variable) Error!void {
     var sublayers: std.ArrayList(usize) = .empty;
     var variables: std.ArrayList(models.Variable) = .empty;
     var instructions: std.ArrayList(models.Instruction) = .empty;
@@ -75,17 +75,17 @@ fn parse_body(self: *Self, layer_index: usize, is_root: bool) Error!void {
         switch (self.current.kind) {
             .LAYER => {
                 try self.advance();
-                const idx = try self.parse_layer(layer_index);
+                const idx = try self.parse_layer(layer_index, variables.items);
                 try sublayers.append(self.arena, idx);
             },
             .LET => {
                 try self.advance();
-                const v = try self.parse_let(layer_index, variables.items);
+                const v = try self.parse_let(layer_index, variables.items, parent_vars);
                 try variables.append(self.arena, v);
             },
             .OPEN, .RUN, .PRINT => {
                 const kind = self.current.kind;
-                const instr = try self.parse_instruction(layer_index, kind, variables.items);
+                const instr = try self.parse_instruction(layer_index, kind, variables.items, parent_vars);
                 try instructions.append(self.arena, instr);
             },
             .RIGHT_BRACE => {
@@ -115,7 +115,7 @@ fn parse_body(self: *Self, layer_index: usize, is_root: bool) Error!void {
     self.layers.items[layer_index].instructions = try instructions.toOwnedSlice(self.arena);
 }
 
-fn parse_layer(self: *Self, parent_index: usize) Error!usize {
+fn parse_layer(self: *Self, parent_index: usize, parent_vars: []const models.Variable) Error!usize {
     // self.current is first token after LAYER keyword
     var name_parts: std.ArrayList([]const u8) = .empty;
     while (is_identifier_like(self.current.kind)) {
@@ -146,12 +146,12 @@ fn parse_layer(self: *Self, parent_index: usize) Error!usize {
         .instructions = &.{},
     });
 
-    try self.parse_body(new_index, false);
+    try self.parse_body(new_index, false, parent_vars);
 
     return new_index;
 }
 
-fn parse_let(self: *Self, layer_index: usize, current_vars: []const models.Variable) Error!models.Variable {
+fn parse_let(self: *Self, layer_index: usize, current_vars: []const models.Variable, parent_vars: []const models.Variable) Error!models.Variable {
     // self.current should be the variable name
     if (!is_identifier_like(self.current.kind)) {
         std.log.err("line {d}: expected variable name", .{self.current.line});
@@ -165,15 +165,15 @@ fn parse_let(self: *Self, layer_index: usize, current_vars: []const models.Varia
         return error.ExpectedEqual;
     }
 
-    const value = try self.resolve_value(layer_index, current_vars);
+    const value = try self.resolve_value(layer_index, current_vars, parent_vars);
     try self.advance(); // prime next structural token
 
     return .{ .name = name, .value = value };
 }
 
-fn parse_instruction(self: *Self, layer_index: usize, kind: Token.Kind, current_vars: []const models.Variable) Error!models.Instruction {
+fn parse_instruction(self: *Self, layer_index: usize, kind: Token.Kind, current_vars: []const models.Variable, parent_vars: []const models.Variable) Error!models.Instruction {
     // self.current is OPEN/RUN/PRINT keyword
-    const value = try self.resolve_value(layer_index, current_vars);
+    const value = try self.resolve_value(layer_index, current_vars, parent_vars);
     try self.advance(); // prime next structural token
 
     return switch (kind) {
@@ -184,7 +184,7 @@ fn parse_instruction(self: *Self, layer_index: usize, kind: Token.Kind, current_
     };
 }
 
-fn resolve_value(self: *Self, layer_index: usize, current_vars: []const models.Variable) Error![]const u8 {
+fn resolve_value(self: *Self, layer_index: usize, current_vars: []const models.Variable, parent_vars: []const models.Variable) Error![]const u8 {
     var buf: std.ArrayList(u8) = .empty;
 
     self.scanner.skip_spaces();
@@ -198,7 +198,7 @@ fn resolve_value(self: *Self, layer_index: usize, current_vars: []const models.V
                 if (!is_identifier_like(id.kind)) return error.ExpectedIdentifier;
                 const close = self.scanner.next();
                 if (close.kind != .DOUBLE_RIGHT_BRACE) return error.ExpectedDoubleRightBrace;
-                const resolved = self.lookup_variable(layer_index, id.lexeme, current_vars) orelse {
+                const resolved = self.lookup_variable(layer_index, id.lexeme, current_vars, parent_vars) orelse {
                     std.log.err("line {d}: unresolved variable '{s}'", .{ id.line, id.lexeme });
                     return error.UnresolvedVariable;
                 };
@@ -212,9 +212,13 @@ fn resolve_value(self: *Self, layer_index: usize, current_vars: []const models.V
     return try buf.toOwnedSlice(self.arena);
 }
 
-fn lookup_variable(self: *Self, layer_index: usize, name: []const u8, current_vars: []const models.Variable) ?[]const u8 {
+fn lookup_variable(self: *Self, layer_index: usize, name: []const u8, current_vars: []const models.Variable, parent_vars: []const models.Variable) ?[]const u8 {
     // First search the in-progress variables for the current layer
     for (current_vars) |v| {
+        if (std.mem.eql(u8, v.name, name)) return v.value;
+    }
+    // Then search parent's in-progress variables
+    for (parent_vars) |v| {
         if (std.mem.eql(u8, v.name, name)) return v.value;
     }
     // Then walk the parent chain (skip current layer since we already searched current_vars)
@@ -307,4 +311,56 @@ test "parse multiple layers" {
     defer result.deinit();
     try std.testing.expectEqual(@as(usize, 3), result.items.len);
     try std.testing.expectEqual(@as(usize, 2), result.items[0].sublayers.len);
+}
+
+test "parse let binding" {
+    const result = try parse(std.testing.allocator,
+        \\let x = hello world
+    );
+    defer result.deinit();
+    try std.testing.expectEqual(@as(usize, 1), result.items[0].variables.len);
+    try std.testing.expectEqualStrings("x", result.items[0].variables[0].name);
+    try std.testing.expectEqualStrings("hello world", result.items[0].variables[0].value);
+}
+
+test "parse let with interpolation" {
+    const result = try parse(std.testing.allocator,
+        \\let base = hello
+        \\let full = {{base}} world
+    );
+    defer result.deinit();
+    try std.testing.expectEqualStrings("hello", result.items[0].variables[0].value);
+    try std.testing.expectEqualStrings("hello world", result.items[0].variables[1].value);
+}
+
+test "parse variable scope chain" {
+    const result = try parse(std.testing.allocator,
+        \\let x = parent_val
+        \\layer child {
+        \\    let y = {{x}} extended
+        \\}
+    );
+    defer result.deinit();
+    try std.testing.expectEqualStrings("parent_val extended", result.items[1].variables[0].value);
+}
+
+test "parse variable shadowing" {
+    const result = try parse(std.testing.allocator,
+        \\let x = original
+        \\layer child {
+        \\    let x = shadowed
+        \\    open {{x}}
+        \\}
+    );
+    defer result.deinit();
+    try std.testing.expectEqualStrings("shadowed", result.items[1].instructions[0].open);
+}
+
+test "parse let with keyword name" {
+    const result = try parse(std.testing.allocator,
+        \\let layer = myvalue
+    );
+    defer result.deinit();
+    try std.testing.expectEqualStrings("layer", result.items[0].variables[0].name);
+    try std.testing.expectEqualStrings("myvalue", result.items[0].variables[0].value);
 }
