@@ -1,12 +1,11 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
 const vaxis = @import("vaxis");
 const vxfw = vaxis.vxfw;
 const TextSpan = vxfw.RichText.TextSpan;
 
-const entries = @import("entries.zig");
+const models = @import("parser/models.zig");
 
 const DisplayItem = struct {
     rich_text: vxfw.RichText,
@@ -18,11 +17,11 @@ const Model = struct {
     filtered: std.ArrayList(DisplayItem),
     list_view: vxfw.ListView,
     text_field: vxfw.TextField,
-    entries: entries.Entries,
-    current_parent: ?usize,
-    target_url: ?[]const u8,
+    layers: models.Layers,
+    current_layer: usize,
+    selected_layer: ?usize,
 
-    pub fn init(allocator: Allocator, ent: entries.Entries) !*Model {
+    pub fn init(allocator: Allocator, layers: models.Layers) !*Model {
         const model = try allocator.create(Model);
         model.* = .{
             .filtered = .empty,
@@ -40,10 +39,10 @@ const Model = struct {
                 .onChange = Model.onChange,
                 .onSubmit = Model.onSubmit,
             },
-            .entries = ent,
+            .layers = layers,
             .arena = std.heap.ArenaAllocator.init(allocator),
-            .current_parent = null,
-            .target_url = null,
+            .current_layer = 0,
+            .selected_layer = null,
         };
 
         return model;
@@ -77,8 +76,8 @@ const Model = struct {
                 }
 
                 if (key.matches(vaxis.Key.escape, .{})) {
-                    if (self.current_parent) |p| {
-                        self.current_parent = self.entries.parents[p];
+                    if (self.layers.items[self.current_layer].parent) |p| {
+                        self.current_layer = p;
                         try self.repopulate_list("");
                     }
                 }
@@ -112,7 +111,7 @@ const Model = struct {
             )),
         };
 
-        const prompt: vxfw.Text = .{ .text = "", .style = .{ .fg = .{ .index = 4 } } };
+        const prompt: vxfw.Text = .{ .text = "", .style = .{ .fg = .{ .index = 4 } } };
 
         const prompt_surface: vxfw.SubSurface = .{
             .origin = .{ .row = 0, .col = 0 },
@@ -150,22 +149,21 @@ const Model = struct {
         const ptr = maybe_ptr orelse return;
         const self: *Model = @ptrCast(@alignCast(ptr));
 
-        // empty list
-        if (self.list_view.cursor > self.filtered.items.len) {
-            return;
-        }
+        if (self.filtered.items.len == 0) return;
+        if (self.list_view.cursor >= self.filtered.items.len) return;
 
-        const selected = self.filtered.items[self.list_view.cursor].idx;
-        for (self.entries.parents[selected..]) |parent| {
-            if (parent == selected) break;
+        const selected_idx = self.filtered.items[self.list_view.cursor].idx;
+        const layer = self.layers.items[selected_idx];
+
+        if (layer.sublayers.len > 0) {
+            // Navigate into sublayer
+            self.current_layer = selected_idx;
+            try self.repopulate_list("");
         } else {
-            self.target_url = self.entries.items[selected].url orelse "urlless";
+            // Leaf layer — select and quit
+            self.selected_layer = selected_idx;
             ctx.quit = true;
-            return;
         }
-
-        self.current_parent = selected;
-        try self.repopulate_list("");
     }
 
     fn repopulate_list(self: *Model, fltr: []const u8) !void {
@@ -173,18 +171,13 @@ const Model = struct {
         self.filtered.clearAndFree(arena);
         _ = self.arena.reset(.free_all);
 
-        for (0..self.entries.items.len) |idx| {
-            if (self.entries.parents[idx] != self.current_parent) {
-                continue;
-            }
-
-            const e = self.entries.items[idx];
-            const text = e.name orelse e.url orelse "nameless";
-            const spans = try filter(arena, text, fltr) orelse continue;
+        for (self.layers.items[self.current_layer].sublayers) |sub_idx| {
+            const layer = self.layers.items[sub_idx];
+            const spans = try filter(arena, layer.name, fltr) orelse continue;
 
             try self.filtered.append(arena, .{
                 .rich_text = .{ .text = spans },
-                .idx = idx,
+                .idx = sub_idx,
             });
         }
 
@@ -223,37 +216,15 @@ fn filter(allocator: Allocator, text: []const u8, fltr: []const u8) !?[]TextSpan
     return try spans.toOwnedSlice(allocator);
 }
 
-pub fn run(allocator: Allocator, ent: entries.Entries) !void {
+pub fn run(allocator: Allocator, layers: models.Layers) !?usize {
     var app = try vxfw.App.init(allocator);
     errdefer app.deinit();
 
-    const model: *Model = try .init(allocator, ent);
+    const model: *Model = try .init(allocator, layers);
     defer model.deinit(allocator);
 
     try app.run(model.widget(), .{});
     app.deinit();
 
-    if (model.target_url == null) {
-        return;
-    }
-
-    _ = try std.posix.write(std.posix.STDOUT_FILENO, model.target_url.?);
-    _ = try std.posix.write(std.posix.STDOUT_FILENO, "\n");
-
-    const cmd: []const u8 = switch (builtin.os.tag) {
-        .linux => "xdg-open",
-        .macos => "open",
-        else => return error.UnsupportedPlatform,
-    };
-
-    const run_result = try std.process.Child.run(.{
-        .allocator = allocator,
-        .argv = &[_][]const u8{ cmd, model.target_url.? },
-    });
-    defer allocator.free(run_result.stdout);
-    defer allocator.free(run_result.stderr);
-
-    if (run_result.term.Exited != 0) {
-        return error.CommandFailed;
-    }
+    return model.selected_layer;
 }
