@@ -1,0 +1,1 @@
+- [Simplicity focus](feedback_simplicity.md) — v2 DSL prioritizes simplicity; line-oriented grammar drives design
