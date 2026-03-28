@@ -79,7 +79,6 @@ fn parse_body(self: *Self, layer_index: usize, is_root: bool, parent_scope: ?*co
     while (true) {
         switch (self.current.kind) {
             .LAYER => {
-                try self.advance();
                 const scope = Scope{ .vars = variables.items, .parent = parent_scope };
                 const idx = try self.parse_layer(layer_index, &scope);
                 try sublayers.append(self.arena, idx);
@@ -124,39 +123,20 @@ fn parse_body(self: *Self, layer_index: usize, is_root: bool, parent_scope: ?*co
 }
 
 fn parse_layer(self: *Self, parent_index: usize, parent_scope: *const Scope) Error!usize {
-    // self.current is first token after LAYER keyword
-    var name_parts: std.ArrayList([]const u8) = .empty;
-    while (true) {
-        if (is_identifier_like(self.current.kind)) {
-            try name_parts.append(self.arena, self.current.lexeme);
-            try self.advance();
-        } else if (self.current.kind == .DOUBLE_LEFT_BRACE) {
-            const id = self.scanner.next();
-            if (!is_identifier_like(id.kind)) return error.ExpectedIdentifier;
-            const close = self.scanner.next();
-            if (close.kind != .DOUBLE_RIGHT_BRACE) return error.ExpectedDoubleRightBrace;
-            const resolved = self.lookup_variable(parent_scope, id.lexeme) orelse {
-                std.log.err("line {d}: unresolved variable '{s}'", .{ id.line, id.lexeme });
-                return error.UnresolvedVariable;
-            };
-            try name_parts.append(self.arena, resolved);
-            try self.advance();
-        } else break;
-    }
+    const raw_name = try self.resolve_value(parent_scope, .left_brace);
+    const name = std.mem.trim(u8, raw_name, " \t");
 
-    if (name_parts.items.len == 0) {
-        std.log.err("line {d}: expected layer name", .{self.current.line});
+    if (name.len == 0) {
+        std.log.err("line {d}: expected layer name", .{self.scanner.line});
         return error.ExpectedIdentifier;
     }
 
+    try self.advance(); // reads LEFT_BRACE
     if (self.current.kind != .LEFT_BRACE) {
         std.log.err("line {d}: expected '{{'", .{self.current.line});
         return error.ExpectedLeftBrace;
     }
     try self.advance(); // consume {
-
-    // Join name parts with spaces
-    const name = try self.join_with_spaces(name_parts.items);
 
     const new_index = self.layers.items.len;
     try self.layers.append(self.arena, .{
@@ -245,23 +225,6 @@ fn lookup_variable(self: *Self, scope: *const Scope, name: []const u8) ?[]const 
     return null;
 }
 
-fn join_with_spaces(self: *Self, parts: [][]const u8) Error![]const u8 {
-    if (parts.len == 0) return "";
-    if (parts.len == 1) return parts[0];
-    var total: usize = parts.len - 1; // spaces
-    for (parts) |p| total += p.len;
-    const result = try self.arena.alloc(u8, total);
-    var pos: usize = 0;
-    for (parts, 0..) |p, i| {
-        if (i > 0) {
-            result[pos] = ' ';
-            pos += 1;
-        }
-        @memcpy(result[pos..][0..p.len], p);
-        pos += p.len;
-    }
-    return result;
-}
 
 test "parse empty input" {
     const result = try parse(std.testing.allocator, "");
@@ -501,6 +464,43 @@ test "parse full v2.ap" {
     // get > pod (index 10)
     try std.testing.expectEqualStrings("kubectl get pod", result.items[10].variables[0].value);
     try std.testing.expectEqualStrings("kubectl get pod describe", result.items[10].instructions[0].run);
+}
+
+test "parse layer name with hyphen" {
+    const result = try parse(std.testing.allocator,
+        \\layer my-layer {
+        \\}
+    );
+    defer result.deinit();
+    try std.testing.expectEqualStrings("my-layer", result.items[1].name);
+}
+
+test "parse layer name with special chars" {
+    const result = try parse(std.testing.allocator,
+        \\layer foo/bar.baz {
+        \\}
+    );
+    defer result.deinit();
+    try std.testing.expectEqualStrings("foo/bar.baz", result.items[1].name);
+}
+
+test "parse layer name with embedded interpolation" {
+    const result = try parse(std.testing.allocator,
+        \\let env = prod
+        \\layer my-{{env}}-service {
+        \\}
+    );
+    defer result.deinit();
+    try std.testing.expectEqualStrings("my-prod-service", result.items[1].name);
+}
+
+test "parse layer name whitespace trimming" {
+    const result = try parse(std.testing.allocator,
+        \\layer   padded   {
+        \\}
+    );
+    defer result.deinit();
+    try std.testing.expectEqualStrings("padded", result.items[1].name);
 }
 
 test "grandparent variable lookup" {
