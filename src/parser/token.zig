@@ -1,18 +1,20 @@
-kind: Kind,
-lexeme: []const u8,
-line: usize,
+kind: Kind = .EOF,
+lexeme: []const u8 = "",
+line: usize = 0,
 
-const Kind = enum(u8) {
+pub const Kind = enum(u8) {
     // Single-character
     LEFT_BRACE,
     RIGHT_BRACE,
-    SLASH,
     EQUAL,
+
+    // Double-character
+    DOUBLE_LEFT_BRACE,
+    DOUBLE_RIGHT_BRACE,
 
     // Literals
     IDENTIFIER,
-    NUMBER,
-    STRING,
+    VALUE_TEXT,
 
     // Keywords
     LAYER,
@@ -22,6 +24,7 @@ const Kind = enum(u8) {
     RUN,
 
     // Specials
+    NEWLINE,
     EOF,
     ERROR,
 };
