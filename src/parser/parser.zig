@@ -217,8 +217,10 @@ fn lookup_variable(self: *Self, scope: *const Scope, name: []const u8) ?[]const 
     _ = self;
     var current: ?*const Scope = scope;
     while (current) |s| {
-        for (s.vars) |v| {
-            if (std.mem.eql(u8, v.name, name)) return v.value;
+        var i = s.vars.len;
+        while (i > 0) {
+            i -= 1;
+            if (std.mem.eql(u8, s.vars[i].name, name)) return s.vars[i].value;
         }
         current = s.parent;
     }
@@ -516,4 +518,16 @@ test "grandparent variable lookup" {
     );
     defer result.deinit();
     try std.testing.expectEqualStrings("from_root", result.items[3].instructions[0].open);
+}
+
+test "same-scope redeclaration shadows earlier" {
+    const result = try parse(std.testing.allocator,
+        \\let x = first
+        \\let x = second
+        \\layer foo {
+        \\    open {{x}}
+        \\}
+    );
+    defer result.deinit();
+    try std.testing.expectEqualStrings("second", result.items[1].instructions[0].open);
 }
