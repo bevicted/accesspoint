@@ -10,7 +10,7 @@ main.zig:
   2. Read file contents
   3. Parse with v2 parser → Layers
   4. Pass Layers to TUI
-  5. TUI returns ?[]Instruction (null = user quit without selecting)
+  5. TUI returns []Instruction (empty = user quit without selecting)
   6. Execute instructions in sequence (root→leaf order)
   7. Clean up
 ```
@@ -23,7 +23,7 @@ The TUI is focused on display and navigation only. Execution happens in main.zig
 Model:
   layers: models.Layers
   current_layer: usize              // starts at 0 (root), replaces current_parent: ?usize
-  selected_instructions: ?[]Instruction  // set on leaf submit, read by main after quit
+  selected_instructions: []Instruction  // set on leaf submit, read by main after quit
   arena, filtered, list_view, text_field  // unchanged from v1
 ```
 
@@ -44,7 +44,7 @@ Each item in the filtered list is a sublayer shown by `name`. The existing `filt
 
 ## Instruction Execution (main.zig)
 
-After TUI returns, if `selected_instructions` is null, exit. Otherwise execute each in order:
+After TUI returns, if `selected_instructions` is empty, exit. Otherwise execute each in order:
 
 - **`open`**: `xdg-open <url>` (Linux) / `open <url>` (macOS) via `std.process.Child`
 - **`run`**: `sh -c "<command>"` via `std.process.Child`
