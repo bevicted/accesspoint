@@ -18,7 +18,7 @@ layer accesspoint {
 let mwl = multi word
 layer {{mwl}} layer {
     print ===============================
-    print this is a {{mwl}} layer's print
+    print this is the {{layer_name}}'s print
     print ===============================
 }
 
