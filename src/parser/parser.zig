@@ -126,9 +126,22 @@ fn parse_body(self: *Self, layer_index: usize, is_root: bool, parent_scope: ?*co
 fn parse_layer(self: *Self, parent_index: usize, parent_scope: *const Scope) Error!usize {
     // self.current is first token after LAYER keyword
     var name_parts: std.ArrayList([]const u8) = .empty;
-    while (is_identifier_like(self.current.kind)) {
-        try name_parts.append(self.arena, self.current.lexeme);
-        try self.advance();
+    while (true) {
+        if (is_identifier_like(self.current.kind)) {
+            try name_parts.append(self.arena, self.current.lexeme);
+            try self.advance();
+        } else if (self.current.kind == .DOUBLE_LEFT_BRACE) {
+            const id = self.scanner.next();
+            if (!is_identifier_like(id.kind)) return error.ExpectedIdentifier;
+            const close = self.scanner.next();
+            if (close.kind != .DOUBLE_RIGHT_BRACE) return error.ExpectedDoubleRightBrace;
+            const resolved = self.lookup_variable(parent_scope, id.lexeme) orelse {
+                std.log.err("line {d}: unresolved variable '{s}'", .{ id.line, id.lexeme });
+                return error.UnresolvedVariable;
+            };
+            try name_parts.append(self.arena, resolved);
+            try self.advance();
+        } else break;
     }
 
     if (name_parts.items.len == 0) {
