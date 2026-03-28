@@ -364,3 +364,129 @@ test "parse let with keyword name" {
     try std.testing.expectEqualStrings("layer", result.items[0].variables[0].name);
     try std.testing.expectEqualStrings("myvalue", result.items[0].variables[0].value);
 }
+
+test "parse open instruction" {
+    const result = try parse(std.testing.allocator,
+        \\layer foo {
+        \\    open https://example.com
+        \\}
+    );
+    defer result.deinit();
+    try std.testing.expectEqual(@as(usize, 1), result.items[1].instructions.len);
+    try std.testing.expectEqualStrings("https://example.com", result.items[1].instructions[0].open);
+}
+
+test "parse run instruction" {
+    const result = try parse(std.testing.allocator,
+        \\layer foo {
+        \\    run echo hello
+        \\}
+    );
+    defer result.deinit();
+    try std.testing.expectEqualStrings("echo hello", result.items[1].instructions[0].run);
+}
+
+test "parse instruction with interpolation" {
+    const result = try parse(std.testing.allocator,
+        \\let url = https://example.com
+        \\layer foo {
+        \\    open {{url}}/path
+        \\}
+    );
+    defer result.deinit();
+    try std.testing.expectEqualStrings("https://example.com/path", result.items[1].instructions[0].open);
+}
+
+test "parse full v2.ap" {
+    const source =
+        \\let var1 = some value
+        \\let var2 = {{var1}} resolved
+        \\// this is a comment
+        \\
+        \\layer accesspoint {
+        \\    let repo = https://github.com/bevicted/accesspoint
+        \\
+        \\    layer repo {
+        \\        open {{repo}}
+        \\    }
+        \\    layer issues {
+        \\        open {{repo}}/issues
+        \\    }
+        \\    layer issue {
+        \\        open {{repo}}/issues/42
+        \\    }
+        \\}
+        \\
+        \\layer multi word layer {
+        \\    open my other repo
+        \\}
+        \\
+        \\layer kubectl {
+        \\    let cmd = kubectl
+        \\
+        \\    layer help {
+        \\        run {{cmd}} help
+        \\    }
+        \\    layer pod {
+        \\        let pod = my-pod
+        \\        run {{cmd}} get pod {{pod}}
+        \\        run {{cmd}} logs -f {{pod}}
+        \\    }
+        \\    layer get {
+        \\        let cmd = {{cmd}} get
+        \\        layer pod {
+        \\            let cmd = {{cmd}} pod
+        \\            let pod_cmd = describe
+        \\            run {{cmd}} {{pod_cmd}}
+        \\        }
+        \\    }
+        \\}
+    ;
+
+    const result = try parse(std.testing.allocator, source);
+    defer result.deinit();
+
+    // 11 layers: root + 10 named
+    try std.testing.expectEqual(@as(usize, 11), result.items.len);
+
+    // Root (index 0)
+    try std.testing.expectEqual(@as(usize, 3), result.items[0].sublayers.len);
+    try std.testing.expectEqualStrings("some value", result.items[0].variables[0].value);
+    try std.testing.expectEqualStrings("some value resolved", result.items[0].variables[1].value);
+
+    // accesspoint (index 1)
+    try std.testing.expectEqualStrings("accesspoint", result.items[1].name);
+    try std.testing.expectEqual(@as(usize, 3), result.items[1].sublayers.len);
+    try std.testing.expectEqualStrings("https://github.com/bevicted/accesspoint", result.items[1].variables[0].value);
+
+    // repo (index 2)
+    try std.testing.expectEqualStrings("https://github.com/bevicted/accesspoint", result.items[2].instructions[0].open);
+
+    // issues (index 3)
+    try std.testing.expectEqualStrings("https://github.com/bevicted/accesspoint/issues", result.items[3].instructions[0].open);
+
+    // issue (index 4)
+    try std.testing.expectEqualStrings("https://github.com/bevicted/accesspoint/issues/42", result.items[4].instructions[0].open);
+
+    // multi word layer (index 5)
+    try std.testing.expectEqualStrings("multi word layer", result.items[5].name);
+    try std.testing.expectEqualStrings("my other repo", result.items[5].instructions[0].open);
+
+    // kubectl (index 6)
+    try std.testing.expectEqualStrings("kubectl", result.items[6].name);
+    try std.testing.expectEqual(@as(usize, 3), result.items[6].sublayers.len);
+
+    // help (index 7)
+    try std.testing.expectEqualStrings("kubectl help", result.items[7].instructions[0].run);
+
+    // pod (index 8)
+    try std.testing.expectEqualStrings("kubectl get pod my-pod", result.items[8].instructions[0].run);
+    try std.testing.expectEqualStrings("kubectl logs -f my-pod", result.items[8].instructions[1].run);
+
+    // get (index 9)
+    try std.testing.expectEqualStrings("kubectl get", result.items[9].variables[0].value);
+
+    // get > pod (index 10)
+    try std.testing.expectEqualStrings("kubectl get pod", result.items[10].variables[0].value);
+    try std.testing.expectEqualStrings("kubectl get pod describe", result.items[10].instructions[0].run);
+}
