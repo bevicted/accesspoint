@@ -89,15 +89,24 @@ fn parse_body(self: *Self, layer_index: usize, is_root: bool) Error!void {
                 try instructions.append(self.arena, instr);
             },
             .RIGHT_BRACE => {
-                if (is_root) return error.UnexpectedRightBrace;
+                if (is_root) {
+                    std.log.err("line {d}: unexpected '}}' at top level", .{self.current.line});
+                    return error.UnexpectedRightBrace;
+                }
                 try self.advance();
                 break;
             },
             .EOF => {
-                if (!is_root) return error.UnexpectedEof;
+                if (!is_root) {
+                    std.log.err("line {d}: unexpected end of file, expected '}}'", .{self.current.line});
+                    return error.UnexpectedEof;
+                }
                 break;
             },
-            else => return error.UnexpectedToken,
+            else => {
+                std.log.err("line {d}: unexpected token", .{self.current.line});
+                return error.UnexpectedToken;
+            },
         }
     }
 
@@ -114,7 +123,15 @@ fn parse_layer(self: *Self, parent_index: usize) Error!usize {
         try self.advance();
     }
 
-    if (self.current.kind != .LEFT_BRACE) return error.ExpectedLeftBrace;
+    if (name_parts.items.len == 0) {
+        std.log.err("line {d}: expected layer name", .{self.current.line});
+        return error.ExpectedIdentifier;
+    }
+
+    if (self.current.kind != .LEFT_BRACE) {
+        std.log.err("line {d}: expected '{{'", .{self.current.line});
+        return error.ExpectedLeftBrace;
+    }
     try self.advance(); // consume {
 
     // Join name parts with spaces
@@ -136,11 +153,17 @@ fn parse_layer(self: *Self, parent_index: usize) Error!usize {
 
 fn parse_let(self: *Self, layer_index: usize) Error!models.Variable {
     // self.current should be the variable name
-    if (!is_identifier_like(self.current.kind)) return error.ExpectedIdentifier;
+    if (!is_identifier_like(self.current.kind)) {
+        std.log.err("line {d}: expected variable name", .{self.current.line});
+        return error.ExpectedIdentifier;
+    }
     const name = self.current.lexeme;
 
     try self.advance();
-    if (self.current.kind != .EQUAL) return error.ExpectedEqual;
+    if (self.current.kind != .EQUAL) {
+        std.log.err("line {d}: expected '='", .{self.current.line});
+        return error.ExpectedEqual;
+    }
 
     const value = try self.resolve_value(layer_index);
     try self.advance(); // prime next structural token
@@ -175,7 +198,10 @@ fn resolve_value(self: *Self, layer_index: usize) Error![]const u8 {
                 if (!is_identifier_like(id.kind)) return error.ExpectedIdentifier;
                 const close = self.scanner.next();
                 if (close.kind != .DOUBLE_RIGHT_BRACE) return error.ExpectedDoubleRightBrace;
-                const resolved = self.lookup_variable(layer_index, id.lexeme) orelse return error.UnresolvedVariable;
+                const resolved = self.lookup_variable(layer_index, id.lexeme) orelse {
+                    std.log.err("line {d}: unresolved variable '{s}'", .{ id.line, id.lexeme });
+                    return error.UnresolvedVariable;
+                };
                 try buf.appendSlice(self.arena, resolved);
             },
             .NEWLINE, .EOF => break,
